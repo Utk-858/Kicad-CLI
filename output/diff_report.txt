@@ -1,0 +1,12 @@
+PCB DIFF REPORT
+
+=== COMPONENT CHANGES ===
+
+=== NET CHANGES ===
+
+=== ROUTING CHANGES ===
+
+=== SUMMARY ===
+Component changes: 0
+Net changes: 0
+Routing changes: 0
