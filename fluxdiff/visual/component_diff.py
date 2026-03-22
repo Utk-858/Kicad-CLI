@@ -1,53 +1,102 @@
 import cv2
 import numpy as np
+import re
 
-def highlight_component_changes(image_path, components_before, components_after, output_path):
+def generate_component_visual_diff(before_png, after_png, before_components, after_components, output_path):
     """
-    Draws red rectangles around components that have moved (by more than 0.1) between 
-    components_before and components_after, based on the output image at image_path.
-    Annotates each box with the reference (ref) of the component.
+    Generates a visual diff image showing added, removed, and moved components.
 
     Args:
-        image_path (str): Path to the board image (PNG).
-        components_before (list): List of Component objects (from PCBData) before change.
-        components_after (list): List of Component objects (from PCBData) after change.
+        before_png (str): Path to 'before' board image (PNG).
+        after_png (str): Path to 'after' board image (PNG) - base image for drawing.
+        before_components (list): List of Component objects before change.
+        after_components (list): List of Component objects after change.
         output_path (str): Path to write the output image.
     """
-    # Load the board image
-    image = cv2.imread(image_path)
+    # Load the after image (visualizes current state)
+    image = cv2.imread(after_png)
     if image is None:
-        raise FileNotFoundError(f"Could not load image at {image_path}")
+        raise FileNotFoundError(f"Could not load image at {after_png}")
 
-    # Build dictionaries of components by ref
-    before_dict = {comp.ref: comp for comp in components_before if hasattr(comp, 'ref')}
-    after_dict = {comp.ref: comp for comp in components_after if hasattr(comp, 'ref')}
+    img_height, img_width = image.shape[:2]
 
+    # Filter out placeholder references (e.g., 'REF**')
+    ref_pattern = re.compile(r"REF\*\*")
+    def is_valid_ref(ref):
+        return not ref_pattern.fullmatch(ref)
+
+    before_dict = {comp.ref: comp for comp in before_components if hasattr(comp, 'ref') and is_valid_ref(comp.ref)}
+    after_dict  = {comp.ref: comp for comp in after_components  if hasattr(comp, 'ref') and is_valid_ref(comp.ref)}
+
+    # Board size estimation from the union of both sets of components
+    all_x = []
+    all_y = []
+    for comp in list(before_dict.values()) + list(after_dict.values()):
+        if hasattr(comp, 'x') and hasattr(comp, 'y'):
+            all_x.append(comp.x)
+            all_y.append(comp.y)
+    # Fallback if nothing found
+    if not all_x or not all_y:
+        raise ValueError("No component positions found for scaling.")
+
+    min_x, max_x = min(all_x), max(all_x)
+    min_y, max_y = min(all_y), max(all_y)
+    board_width  = max_x - min_x if max_x != min_x else 1
+    board_height = max_y - min_y if max_y != min_y else 1
+
+    scale_x = img_width / board_width
+    scale_y = img_height / board_height
+
+    # Drawing parameters
+    box_w, box_h = 60, 30  # pixels
+
+    # Track drawn refs to avoid duplicate labeling
+    drawn_refs = set()
+
+    # 1. Draw ADDED components (green)
     for ref, after_comp in after_dict.items():
-        before_comp = before_dict.get(ref)
-        if before_comp is not None:
-            # Compare coordinates
-            old_x, old_y = before_comp.x, before_comp.y
-            new_x, new_y = after_comp.x, after_comp.y
-            dist = ((new_x - old_x)**2 + (new_y - old_y)**2) ** 0.5
-            if dist > 0.1:
-                # Draw a red rectangle around the new component position
+        if ref not in before_dict:
+            px = int(round((after_comp.x - min_x) * scale_x))
+            py = int(round((after_comp.y - min_y) * scale_y))
+            top_left     = (px - box_w // 2, py - box_h // 2)
+            bottom_right = (px + box_w // 2, py + box_h // 2)
+            cv2.rectangle(image, top_left, bottom_right, color=(0, 255, 0), thickness=3)
+            label = f"ADDED: {ref}"
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            text_pos = (top_left[0], top_left[1] - 10)
+            cv2.putText(image, label, text_pos, font, 0.7, (0, 255, 0), 2, cv2.LINE_AA)
+            drawn_refs.add(ref)
 
-                # Define rectangle region (assuming (x,y) are in image coordinates)
-                # If they are in mm or similar, image scaling may be needed.
-                # We'll use a fixed box size for the highlight.
-                box_w, box_h = 40, 20  # pixels, arbitrary but visible
-                px = int(round(new_x))
-                py = int(round(new_y))
-                top_left = (px - box_w//2, py - box_h//2)
-                bottom_right = (px + box_w//2, py + box_h//2)
+    # 2. Draw REMOVED components (red)
+    for ref, before_comp in before_dict.items():
+        if ref not in after_dict:
+            px = int(round((before_comp.x - min_x) * scale_x))
+            py = int(round((before_comp.y - min_y) * scale_y))
+            top_left     = (px - box_w // 2, py - box_h // 2)
+            bottom_right = (px + box_w // 2, py + box_h // 2)
+            cv2.rectangle(image, top_left, bottom_right, color=(0, 0, 255), thickness=3)
+            label = f"REMOVED: {ref}"
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            text_pos = (top_left[0], top_left[1] - 10)
+            cv2.putText(image, label, text_pos, font, 0.7, (0, 0, 255), 2, cv2.LINE_AA)
+            drawn_refs.add(ref)
 
-                # Draw rectangle
-                cv2.rectangle(image, top_left, bottom_right, color=(0,0,255), thickness=2)
+    # 3. Draw MOVED components (yellow)
+    for ref in set(before_dict.keys()) & set(after_dict.keys()):
+        before_comp = before_dict[ref]
+        after_comp = after_dict[ref]
+        # Compute Euclidean distance in board units
+        dist = ((after_comp.x - before_comp.x) ** 2 + (after_comp.y - before_comp.y) ** 2) ** 0.5
+        if dist > 0.1:
+            px = int(round((after_comp.x - min_x) * scale_x))
+            py = int(round((after_comp.y - min_y) * scale_y))
+            top_left     = (px - box_w // 2, py - box_h // 2)
+            bottom_right = (px + box_w // 2, py + box_h // 2)
+            cv2.rectangle(image, top_left, bottom_right, color=(0, 255, 255), thickness=3)
+            label = f"MOVED: {ref}"
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            text_pos = (top_left[0], top_left[1] - 10)
+            cv2.putText(image, label, text_pos, font, 0.7, (0, 255, 255), 2, cv2.LINE_AA)
+            drawn_refs.add(ref)
 
-                # Put reference text above the rectangle
-                font = cv2.FONT_HERSHEY_SIMPLEX
-                text_pos = (top_left[0], top_left[1] - 8)
-                cv2.putText(image, ref, text_pos, font, 0.7, (0,0,255), 2, cv2.LINE_AA)
-
-    # Save output image
     cv2.imwrite(output_path, image)

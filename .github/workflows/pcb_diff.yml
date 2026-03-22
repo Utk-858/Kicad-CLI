@@ -2,6 +2,8 @@ name: PCB Diff
 
 on:
   pull_request:
+    paths:
+      - '**.kicad_pcb'
 
 jobs:
   pcb-diff:
@@ -22,41 +24,77 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Detect changed .kicad_pcb file
+      - name: Detect changed .kicad_pcb files
         id: pcb
         run: |
-          FILE=$(git diff --name-only origin/main HEAD | grep ".kicad_pcb" | head -n 1)
-          echo "file=$FILE" >> $GITHUB_OUTPUT
+          FILES=$(git diff --name-only origin/main HEAD | grep ".kicad_pcb" || true)
+          echo "files<<EOF" >> $GITHUB_OUTPUT
+          echo "$FILES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Extract PCB file versions
-        if: steps.pcb.outputs.file != ''
+        if: steps.pcb.outputs.files != ''
         run: |
           mkdir -p boards
-          # Extract previous version from origin/main
-          if git cat-file -e origin/main:"${{ steps.pcb.outputs.file }}"; then
-            git show origin/main:"${{ steps.pcb.outputs.file }}" > boards/before.kicad_pcb
-          else
-            echo "PCB file not found in origin/main, using empty file as base."
-            touch boards/before.kicad_pcb
-          fi
-          # Copy current version from PR
-          cp "${{ steps.pcb.outputs.file }}" boards/after.kicad_pcb
+          # Save changed files (one per line)
+          echo "${{ steps.pcb.outputs.files }}" | while read FILE; do
+            [ -z "$FILE" ] && continue
+            # Extract previous version from origin/main
+            if git cat-file -e origin/main:"$FILE"; then
+              git show origin/main:"$FILE" > "boards/before_$(basename $FILE)"
+            else
+              echo "PCB file not found in origin/main, using empty file as base."
+              touch "boards/before_$(basename $FILE)"
+            fi
+            # Copy current version from PR
+            cp "$FILE" "boards/after_$(basename $FILE)"
+          done
 
-      - name: Run fluxdiff
-        if: steps.pcb.outputs.file != ''
+      - name: Ensure output directory exists
+        if: steps.pcb.outputs.files != ''
         run: |
           mkdir -p output
-          python -m fluxdiff.cli.main boards/before.kicad_pcb boards/after.kicad_pcb --output output/
 
-      - name: Comment PCB diff report on PR
-        if: steps.pcb.outputs.file != '' && success()
-        uses: marocchino/sticky-pull-request-comment@v2
-        with:
-          path: output/diff_report.txt
+      - name: Run fluxdiff for all changed PCB files
+        if: steps.pcb.outputs.files != ''
+        run: |
+          set -e
+          PCB_FOUND=0
+          echo "${{ steps.pcb.outputs.files }}" | while read FILE; do
+            [ -z "$FILE" ] && continue
+            PCB_FOUND=1
+            BEFORE="boards/before_$(basename $FILE)"
+            AFTER="boards/after_$(basename $FILE)"
+            if [ -f "$BEFORE" ] && [ -f "$AFTER" ]; then
+              # Output for each PCB into the output dir (may overwrite if names overlap)
+              python -m fluxdiff.cli.main "$BEFORE" "$AFTER" --output output/
+            fi
+          done
+          if [ $PCB_FOUND -eq 0 ]; then
+            echo "No PCB files to compare."
+          fi
 
-      - name: Upload PCB diff report as artifact
-        if: steps.pcb.outputs.file != ''
+      - name: Upload PCB diff as artifact
+        if: steps.pcb.outputs.files != ''
         uses: actions/upload-artifact@v3
         with:
-          name: pcb-diff-report
+          name: pcb-diff
           path: output/
+
+      - name: Comment summary on PR
+        if: steps.pcb.outputs.files != '' && success()
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          message: |
+            ## 🧠 FluxDiff PCB Analysis
+
+            FluxDiff detected PCB layout changes.
+
+            Generated artifacts:
+
+            - before.png
+            - after.png
+            - diff_overlay.png
+            - diff_report.txt
+
+            Download the visual diff images from the Artifacts section of this workflow run.

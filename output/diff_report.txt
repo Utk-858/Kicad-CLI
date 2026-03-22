@@ -1,12 +1,49 @@
 PCB DIFF REPORT
 
 === COMPONENT CHANGES ===
+- Component moved: R101 (143.37,64.135 -> 131.0,69.0)
+- Component value changed: R101 10k -> 5k
 
 === NET CHANGES ===
+- CRITICAL: R101 pad 1 changed from /WIFI_3V3 -> 
+- CRITICAL: R101 pad 2 changed from Net-(U102-Ch_PD) -> 
+- ERC: WARNING: Net +5V is floating (only one connection)
+- ERC: WARNING: Net PB2 is floating (only one connection)
+- ERC: WARNING: Net PB3 is floating (only one connection)
+- ERC: WARNING: Net PB6 is floating (only one connection)
+- ERC: WARNING: Net PB7 is floating (only one connection)
+- ERC: WARNING: Net PD0 is floating (only one connection)
+- ERC: WARNING: Net PD1 is floating (only one connection)
+- ERC: WARNING: Net PD2 is floating (only one connection)
+- ERC: WARNING: Net PD3 is floating (only one connection)
+- ERC: WARNING: Net PE0 is floating (only one connection)
+- ERC: WARNING: Net PE1 is floating (only one connection)
+- ERC: WARNING: Net PE2 is floating (only one connection)
+- ERC: WARNING: Net PE3 is floating (only one connection)
+- ERC: WARNING: Net PE4 is floating (only one connection)
+- ERC: WARNING: Net PE5 is floating (only one connection)
+- ERC: WARNING: Net PF0 is floating (only one connection)
+- ERC: WARNING: Net PF1 is floating (only one connection)
+- ERC: WARNING: Net PF2 is floating (only one connection)
+- ERC: WARNING: Net PF3 is floating (only one connection)
+- ERC: WARNING: Net unconnected-(H1-Hole-Pad1) is floating (only one connection)
+- ERC: WARNING: Net unconnected-(H2-Hole-Pad1) is floating (only one connection)
+- ERC: WARNING: Net unconnected-(H3-Hole-Pad1) is floating (only one connection)
+- ERC: WARNING: Net unconnected-(H4-Hole-Pad1) is floating (only one connection)
+- ERC: WARNING: Net unconnected-(U101-~{TARGETRST}-PadJ2_5) is floating (only one connection)
 
 === ROUTING CHANGES ===
+- Trace added: net GND, layer F.Cu, from (117.255, 94.535) to (140.5, 94.535)
+- Trace added: net GND, layer F.Cu, from (39.68, 72.0) to (41.185, 70.495)
+- Trace added: net GND, layer F.Cu, from (41.185, 70.495) to (81.825, 70.495)
+- Trace added: net GND, layer F.Cu, from (81.825, 70.495) to (82.86, 69.46)
+- Trace added: net GND, layer F.Cu, from (92.54, 119.25) to (117.255, 94.535)
+- Trace added: net Net-(U102-Ch_PD), layer F.Cu, from (130.175, 55.875) to (135.75, 61.45)
+- Trace added: net Net-(U102-Ch_PD), layer F.Cu, from (135.75, 61.45) to (135.75, 64.135)
+- Trace added: net PD0, layer F.Cu, from (39.68, 74.54) to (40.5, 73.72)
+- Trace added: net PD0, layer F.Cu, from (40.5, 73.5) to (40.5, 73.72)
 
 === SUMMARY ===
-Component changes: 0
-Net changes: 0
-Routing changes: 0
+Component changes: 2
+Net changes: 26
+Routing changes: 9

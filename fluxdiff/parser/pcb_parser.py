@@ -67,12 +67,16 @@ def extract_nets(root):
 
     return nets
 
-
 def extract_components(root, nets):
     components = []
     net_mapping = {n.net_id: n.name for n in nets}
 
-    for fp in find_nodes(root, "footprint"):
+    # Support both KiCad formats:
+    # KiCad 6+  -> (footprint ...)
+    # KiCad 5   -> (module ...)
+    footprints = find_nodes(root, "footprint") + find_nodes(root, "module")
+
+    for fp in footprints:
 
         ref = ""
         value = ""
@@ -82,17 +86,20 @@ def extract_components(root, nets):
 
         for child in fp.children:
 
+            # --- position ---
             if child.name == "at":
                 try:
                     x = float(child.values[0]) if len(child.values) > 0 else 0
                     y = float(child.values[1]) if len(child.values) > 1 else 0
                     rotation = float(child.values[2]) if len(child.values) > 2 else 0
-                except:
+                except Exception:
                     pass
 
+            # --- layer ---
             elif child.name == "layer":
                 layer = child.values[0] if child.values else ""
 
+            # --- KiCad 6+ property format ---
             elif child.name == "property":
                 if len(child.values) >= 2:
                     key = child.values[0].strip('"')
@@ -102,6 +109,17 @@ def extract_components(root, nets):
                         ref = val
                     elif key == "Value":
                         value = val
+
+            # --- KiCad 5 text format ---
+            elif child.name == "fp_text":
+                if len(child.values) >= 2:
+                    text_type = child.values[0].strip('"')
+                    text_val = child.values[1].strip('"')
+
+                    if text_type.lower() == "reference":
+                        ref = text_val
+                    elif text_type.lower() == "value":
+                        value = text_val
 
         pads = extract_pads(fp)
 
@@ -116,7 +134,9 @@ def extract_components(root, nets):
             pads=pads
         )
 
-        components.append(comp)
+        # ignore placeholder references
+        if ref and ref != "REF**":
+            components.append(comp)
 
     return components
 
