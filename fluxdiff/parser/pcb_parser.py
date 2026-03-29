@@ -23,7 +23,7 @@ def find_nodes(node, target_name):
         results.extend(find_nodes(child, target_name))
     return results
 
-def extract_pads(footprint_node):
+def extract_pads(footprint_node, net_mapping):
     pads = []
 
     for child in footprint_node.children:
@@ -31,39 +31,37 @@ def extract_pads(footprint_node):
 
             pad_number = child.values[0].strip('"') if child.values else ""
 
-            net_name = ""
+            net_id = None
+            net_name = None
 
             for pad_child in child.children:
                 if pad_child.name == "net":
-                    # net structure: (net <id> "NAME")
-                    if len(pad_child.values) >= 2:
-                        net_name = pad_child.values[1].strip('"')
+                    try:
+                        net_id = int(pad_child.values[0])
+                    except:
+                        pass
+
+            # 🔥 Resolve using global mapping
+            if net_id is not None:
+                net_name = net_mapping.get(net_id)
 
             pads.append(Pad(number=pad_number, net=net_name))
 
     return pads
 
 def extract_nets(root):
-    """
-    Extract all net definitions from the KiCad PCB tree.
-
-    KiCad nets look like:
-        (net 1 "GND")
-        (net 2 "VCC")
-    """
-
     nets = []
 
-    for net_node in find_nodes(root, "net"):
-
-        if len(net_node.values) >= 2:
-            try:
-                net_id = int(net_node.values[0])
-                net_name = net_node.values[1].strip('"')
-                if net_id != 0:
-                    nets.append(Net(net_id=net_id, name=net_name))
-            except Exception:
-                pass
+    for node in root.children:
+        if node.name == "net":
+            if len(node.values) >= 2:
+                try:
+                    net_id = int(node.values[0])
+                    net_name = node.values[1].strip('"')
+                    if net_id != 0:
+                        nets.append(Net(net_id=net_id, name=net_name))
+                except:
+                    pass
 
     return nets
 
@@ -100,15 +98,24 @@ def extract_components(root, nets):
                 layer = child.values[0] if child.values else ""
 
             # --- KiCad 6+ property format ---
+            # AFTER — handles value as either values[1] OR first child's value
             elif child.name == "property":
-                if len(child.values) >= 2:
-                    key = child.values[0].strip('"')
-                    val = child.values[1].strip('"')
+                if len(child.values) >= 1:
+                   key = child.values[0].strip('"')
 
-                    if key == "Reference":
-                        ref = val
-                    elif key == "Value":
-                        value = val
+                   # Try values[1] first (simple case)
+                   if len(child.values) >= 2:
+                     val = child.values[1].strip('"')
+                  # Fall back: KiCad 8 puts the value as a bare token in children
+                   elif child.children and child.children[0].values:
+                     val = child.children[0].values[0].strip('"')
+                   else:
+                    val = ""
+
+                   if key == "Reference":
+                    ref = val
+                   elif key == "Value":
+                    value = val
 
             # --- KiCad 5 text format ---
             elif child.name == "fp_text":
@@ -121,7 +128,7 @@ def extract_components(root, nets):
                     elif text_type.lower() == "value":
                         value = text_val
 
-        pads = extract_pads(fp)
+        pads = extract_pads(fp, net_mapping)
 
         comp = Component(
             ref=ref,
@@ -147,7 +154,7 @@ def extract_traces(root, nets):
     for segment in find_nodes(root, "segment"):
         layer = ""
         net_id = None
-        net_name = ""
+        net_name = None
         start = (0.0, 0.0)
         end = (0.0, 0.0)
         for child in segment.children:

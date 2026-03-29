@@ -5,32 +5,8 @@ PCB DIFF REPORT
 - Component value changed: R101 10k -> 5k
 
 === NET CHANGES ===
-- CRITICAL: R101 pad 1 changed from /WIFI_3V3 -> 
-- CRITICAL: R101 pad 2 changed from Net-(U102-Ch_PD) -> 
-- ERC: WARNING: Net +5V is floating (only one connection)
-- ERC: WARNING: Net PB2 is floating (only one connection)
-- ERC: WARNING: Net PB3 is floating (only one connection)
-- ERC: WARNING: Net PB6 is floating (only one connection)
-- ERC: WARNING: Net PB7 is floating (only one connection)
-- ERC: WARNING: Net PD0 is floating (only one connection)
-- ERC: WARNING: Net PD1 is floating (only one connection)
-- ERC: WARNING: Net PD2 is floating (only one connection)
-- ERC: WARNING: Net PD3 is floating (only one connection)
-- ERC: WARNING: Net PE0 is floating (only one connection)
-- ERC: WARNING: Net PE1 is floating (only one connection)
-- ERC: WARNING: Net PE2 is floating (only one connection)
-- ERC: WARNING: Net PE3 is floating (only one connection)
-- ERC: WARNING: Net PE4 is floating (only one connection)
-- ERC: WARNING: Net PE5 is floating (only one connection)
-- ERC: WARNING: Net PF0 is floating (only one connection)
-- ERC: WARNING: Net PF1 is floating (only one connection)
-- ERC: WARNING: Net PF2 is floating (only one connection)
-- ERC: WARNING: Net PF3 is floating (only one connection)
-- ERC: WARNING: Net unconnected-(H1-Hole-Pad1) is floating (only one connection)
-- ERC: WARNING: Net unconnected-(H2-Hole-Pad1) is floating (only one connection)
-- ERC: WARNING: Net unconnected-(H3-Hole-Pad1) is floating (only one connection)
-- ERC: WARNING: Net unconnected-(H4-Hole-Pad1) is floating (only one connection)
-- ERC: WARNING: Net unconnected-(U101-~{TARGETRST}-PadJ2_5) is floating (only one connection)
+- WARNING: R101 pad 1 disconnected from /WIFI_3V3
+- WARNING: R101 pad 2 disconnected from Net-(U102-Ch_PD)
 
 === ROUTING CHANGES ===
 - Trace added: net GND, layer F.Cu, from (117.255, 94.535) to (140.5, 94.535)
@@ -45,5 +21,5 @@ PCB DIFF REPORT
 
 === SUMMARY ===
 Component changes: 2
-Net changes: 26
+Net changes: 2
 Routing changes: 9

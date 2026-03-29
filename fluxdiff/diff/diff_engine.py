@@ -25,8 +25,10 @@ def compare_pcbs(old_pcb: PCBData, new_pcb: PCBData) -> DiffResult:
     result.net_changes.extend([f"CONNECTIVITY: {msg}" for msg in connectivity_changes])
 
     # --- ERC Checks ---
-    erc_messages = run_erc_checks(graph_new)
-    result.net_changes.extend([f"ERC: {msg}" for msg in erc_messages])
+    erc_old = set(run_erc_checks(graph_old))
+    erc_new = set(run_erc_checks(graph_new))
+    new_erc_issues = erc_new - erc_old  # only warnings that are NEW in after
+    result.net_changes.extend([f"ERC: {msg}" for msg in sorted(new_erc_issues)])
 
     # Sort outputs for consistent reporting
     result.net_changes.sort()
@@ -217,9 +219,11 @@ def net_diff(old_pcb: PCBData, new_pcb: PCBData, result: DiffResult):
                 )
             # Pad became disconnected (net -> None)
             elif old_net is not None and new_net is None:
-                result.net_changes.append(
-                    f"WARNING: {ref} pad {pad_num} disconnected from {old_net}"
-                )
+                # Only report if the pad still exists in the new file (not just unresolved)
+                if any(c.ref == ref for c in new_pcb.components):
+                   result.net_changes.append(
+                      f"WARNING: {ref} pad {pad_num} disconnected from {old_net}"
+        )
 
 
 # ---------- Routing Comparison ----------
