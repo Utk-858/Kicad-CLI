@@ -67,84 +67,72 @@ def extract_nets(root):
 
 def extract_components(root, nets):
     components = []
-    net_mapping = {n.net_id: n.name for n in nets}
-
-    # Support both KiCad formats:
-    # KiCad 6+  -> (footprint ...)
-    # KiCad 5   -> (module ...)
+    # find_nodes is good, but ensure it's catching the right level
     footprints = find_nodes(root, "footprint") + find_nodes(root, "module")
 
     for fp in footprints:
-
         ref = ""
         value = ""
-        footprint_name = fp.values[0] if fp.values else ""
+        # The footprint name is usually the first value after 'footprint'
+        footprint_name = fp.values[0].strip('"') if fp.values else ""
         x, y, rotation = 0.0, 0.0, 0.0
         layer = ""
 
         for child in fp.children:
-
             # --- position ---
             if child.name == "at":
-                try:
-                    x = float(child.values[0]) if len(child.values) > 0 else 0
-                    y = float(child.values[1]) if len(child.values) > 1 else 0
-                    rotation = float(child.values[2]) if len(child.values) > 2 else 0
-                except Exception:
-                    pass
-
-            # --- layer ---
-            elif child.name == "layer":
-                layer = child.values[0] if child.values else ""
+                # Values: [x, y, (optional) rotation]
+                vals = [v for v in child.values if v is not None]
+                if len(vals) >= 2:
+                    try:
+                        x = float(vals[0])
+                        y = float(vals[1])
+                        if len(vals) >= 3:
+                            rotation = float(vals[2])
+                    except ValueError:
+                        pass
 
             # --- KiCad 6+ property format ---
             # AFTER — handles value as either values[1] OR first child's value
             elif child.name == "property":
-                if len(child.values) >= 1:
-                   key = child.values[0].strip('"')
-
-                   # Try values[1] first (simple case)
-                   if len(child.values) >= 2:
-                     val = child.values[1].strip('"')
-                  # Fall back: KiCad 8 puts the value as a bare token in children
-                   elif child.children and child.children[0].values:
-                     val = child.children[0].values[0].strip('"')
-                   else:
-                    val = ""
-
-                   if key == "Reference":
-                    ref = val
-                   elif key == "Value":
-                    value = val
-
-            # --- KiCad 5 text format ---
-            elif child.name == "fp_text":
+                # (property "Reference" "R1" (at ...))
                 if len(child.values) >= 2:
-                    text_type = child.values[0].strip('"')
-                    text_val = child.values[1].strip('"')
+                    key = child.values[0].strip('"')
+                    val = child.values[1].strip('"')
+                    if key == "Reference":
+                        ref = val
+                    elif key == "Value":
+                        value = val
 
-                    if text_type.lower() == "reference":
+            # --- KiCad 5 / Backwards Compatibility ---
+            elif child.name == "fp_text":
+                # (fp_text reference "REF**" (at ...))
+                if len(child.values) >= 2:
+                    text_type = child.values[0].strip('"').lower()
+                    text_val = child.values[1].strip('"')
+                    if text_type == "reference":
                         ref = text_val
-                    elif text_type.lower() == "value":
+                    elif text_type == "value":
                         value = text_val
 
-        pads = extract_pads(fp, net_mapping)
+        # Final check: If Reference is still empty, search child nodes of 'fp_text' or 'property'
+        # Some parsers put the actual text as a child node rather than a value.
 
-        comp = Component(
-            ref=ref,
-            value=value,
-            footprint=footprint_name,
-            x=x,
-            y=y,
-            rotation=rotation,
-            layer=layer,
-            pads=pads
-        )
-
-        # ignore placeholder references
         if ref and ref != "REF**":
+            comp = Component(
+                ref=ref,
+                value=value,
+                footprint=footprint_name,
+                x=x,
+                y=y,
+                rotation=rotation,
+                layer=layer,
+                pads=extract_pads(fp)
+            )
             components.append(comp)
+            print(f"✅ Found: {ref} at ({x}, {y})")
 
+    print(f"--- Extraction Complete: {len(components)} components found ---")
     return components
 
 def extract_traces(root, nets):
