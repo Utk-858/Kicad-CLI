@@ -1,6 +1,7 @@
 from fluxdiff.models.pcb_models import PCBData, Component, Net, Trace, Via, Pad
 from fluxdiff.parser.sexp_parser import parse_sexp
 
+
 def parse_pcb(file_path):
     root = parse_sexp(file_path)
     nets = extract_nets(root)
@@ -14,8 +15,8 @@ def parse_pcb(file_path):
         vias=vias
     )
 
+
 def find_nodes(node, target_name):
-    """Recursively find all nodes with .name == target_name."""
     results = []
     if getattr(node, "name", None) == target_name:
         results.append(node)
@@ -23,6 +24,25 @@ def find_nodes(node, target_name):
         results.extend(find_nodes(child, target_name))
     return results
 
+
+# ---------- NETS ----------
+def extract_nets(root):
+    nets = []
+
+    for net_node in find_nodes(root, "net"):
+        if len(net_node.values) >= 2:
+            try:
+                net_id = int(net_node.values[0])
+                net_name = net_node.values[1].strip('"')
+                if net_id != 0:
+                    nets.append(Net(net_id=net_id, name=net_name))
+            except:
+                pass
+
+    return nets
+
+
+# ---------- PADS ----------
 def extract_pads(footprint_node, net_mapping):
     pads = []
 
@@ -41,7 +61,6 @@ def extract_pads(footprint_node, net_mapping):
                     except:
                         pass
 
-            # 🔥 Resolve using global mapping
             if net_id is not None:
                 net_name = net_mapping.get(net_id)
 
@@ -49,75 +68,65 @@ def extract_pads(footprint_node, net_mapping):
 
     return pads
 
-def extract_nets(root):
-    nets = []
 
-    for node in root.children:
-        if node.name == "net":
-            if len(node.values) >= 2:
-                try:
-                    net_id = int(node.values[0])
-                    net_name = node.values[1].strip('"')
-                    if net_id != 0:
-                        nets.append(Net(net_id=net_id, name=net_name))
-                except:
-                    pass
-
-    return nets
-
+# ---------- COMPONENTS ----------
 def extract_components(root, nets):
     components = []
-    # find_nodes is good, but ensure it's catching the right level
+    net_mapping = {n.net_id: n.name for n in nets}
+
     footprints = find_nodes(root, "footprint") + find_nodes(root, "module")
 
     for fp in footprints:
         ref = ""
         value = ""
-        # The footprint name is usually the first value after 'footprint'
         footprint_name = fp.values[0].strip('"') if fp.values else ""
         x, y, rotation = 0.0, 0.0, 0.0
         layer = ""
 
-        for child in fp.children:
-            # --- position ---
-            if child.name == "at":
-                # Values: [x, y, (optional) rotation]
-                vals = [v for v in child.values if v is not None]
+        # ✅ FIX: ONLY use top-level (at ...)
+        at_nodes = [c for c in fp.children if c.name == "at"]
+        if at_nodes:
+            at = at_nodes[0]
+            try:
+                vals = at.values
                 if len(vals) >= 2:
-                    try:
-                        x = float(vals[0])
-                        y = float(vals[1])
-                        if len(vals) >= 3:
-                            rotation = float(vals[2])
-                    except ValueError:
-                        pass
+                    x = float(vals[0])
+                    y = float(vals[1])
+                if len(vals) >= 3:
+                    rotation = float(vals[2])
+            except:
+                pass
 
-            # --- KiCad 6+ property format ---
-            # AFTER — handles value as either values[1] OR first child's value
+        # Extract other properties
+        for child in fp.children:
+
+            # --- Layer ---
+            if child.name == "layer":
+                layer = child.values[0] if child.values else ""
+
+            # --- KiCad 6 property ---
             elif child.name == "property":
-                # (property "Reference" "R1" (at ...))
                 if len(child.values) >= 2:
                     key = child.values[0].strip('"')
                     val = child.values[1].strip('"')
+
                     if key == "Reference":
                         ref = val
                     elif key == "Value":
                         value = val
 
-            # --- KiCad 5 / Backwards Compatibility ---
+            # --- KiCad 5 fallback ---
             elif child.name == "fp_text":
-                # (fp_text reference "REF**" (at ...))
                 if len(child.values) >= 2:
                     text_type = child.values[0].strip('"').lower()
                     text_val = child.values[1].strip('"')
+
                     if text_type == "reference":
                         ref = text_val
                     elif text_type == "value":
                         value = text_val
 
-        # Final check: If Reference is still empty, search child nodes of 'fp_text' or 'property'
-        # Some parsers put the actual text as a child node rather than a value.
-
+        # Ignore invalid refs
         if ref and ref != "REF**":
             comp = Component(
                 ref=ref,
@@ -127,72 +136,85 @@ def extract_components(root, nets):
                 y=y,
                 rotation=rotation,
                 layer=layer,
-                pads=extract_pads(fp)
+                pads=extract_pads(fp, net_mapping)  # ✅ FIXED
             )
-            components.append(comp)
-            print(f"✅ Found: {ref} at ({x}, {y})")
 
-    print(f"--- Extraction Complete: {len(components)} components found ---")
+            components.append(comp)
+
     return components
 
+
+# ---------- TRACES ----------
 def extract_traces(root, nets):
-    # traces come from (segment ...)
     net_mapping = {n.net_id: n.name for n in nets}
     traces = []
+
     for segment in find_nodes(root, "segment"):
         layer = ""
         net_id = None
         net_name = None
         start = (0.0, 0.0)
         end = (0.0, 0.0)
+
         for child in segment.children:
             if child.name == "layer":
                 layer = child.values[0] if child.values else ""
+
             elif child.name == "net":
                 try:
                     net_id = int(child.values[0])
-                    net_name = net_mapping.get(net_id, "")
-                except Exception:
-                    net_name = ""
+                    net_name = net_mapping.get(net_id)
+                except:
+                    net_name = None
+
             elif child.name == "start":
                 try:
                     x = float(child.values[0])
                     y = float(child.values[1])
                     start = (x, y)
-                except Exception:
+                except:
                     pass
+
             elif child.name == "end":
                 try:
                     x = float(child.values[0])
                     y = float(child.values[1])
                     end = (x, y)
-                except Exception:
+                except:
                     pass
+
         if layer and start and end and net_name:
             traces.append(Trace(layer=layer, start=start, end=end, net=net_name))
+
     return traces
 
+
+# ---------- VIAS ----------
 def extract_vias(root, nets):
-    # (via ... (at x y) (net id))
     net_mapping = {n.net_id: n.name for n in nets}
     vias = []
+
     for via in find_nodes(root, "via"):
         x, y = 0.0, 0.0
         net_id = None
-        net_name = ""
+        net_name = None
+
         for child in via.children:
             if child.name == "at":
                 try:
                     x = float(child.values[0])
                     y = float(child.values[1])
-                except Exception:
+                except:
                     pass
+
             elif child.name == "net":
                 try:
                     net_id = int(child.values[0])
-                    net_name = net_mapping.get(net_id, "")
-                except Exception:
-                    net_name = ""
+                    net_name = net_mapping.get(net_id)
+                except:
+                    net_name = None
+
         if net_name:
             vias.append(Via(x=x, y=y, net=net_name))
+
     return vias

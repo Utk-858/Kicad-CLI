@@ -103,7 +103,7 @@ def main(before_file, after_file, viewer):
         try:
             from fluxdiff.viewer.server import run_viewer_server
             print("Opening PCB diff viewer at http://localhost:5000")
-            run_viewer_server()
+            run_viewer_server(diff_report)
         except Exception as e:
             print("[ERROR] Could not launch viewer:", e)
 
