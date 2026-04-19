@@ -1,0 +1,12 @@
+opencv-python
+numpy
+pillow
+click
+flask
+cairosvg
+openai
+python-dotenv
+faiss-cpu
+fastapi
+uvicorn
+cors

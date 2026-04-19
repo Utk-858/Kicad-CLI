@@ -1,871 +1,272 @@
-# FluxDiff – Full Project Context
+# 🏗️ Project Context: FluxDiff
 
-## Project Overview
+## 1. High-Level Mission
 
-FluxDiff is a tool for **semantic and visual comparison of KiCad PCB files (`.kicad_pcb`)**.
-
-The goal is to detect **layout, connectivity, and routing differences** between two PCB revisions and present them in both **machine-readable and visual form**.
-
-FluxDiff combines:
-
-- PCB semantic diff engine
-- Visual diff generation (OpenCV)
-- Interactive viewer
-- CLI tool
-- GitHub Pull Request automation
-
-The architecture resembles professional PCB review tools used in EDA environments.
+- **The Problem:** KiCad PCB designers have no semantic diff tool. `git diff` on `.kicad_pcb` files produces unreadable S-expression noise. Engineers can't quickly tell what actually changed between two board revisions — which components moved, which nets rewired, which traces were added.
+- **The Goal (MVP Definition of Done):** Given two `.kicad_pcb` files, FluxDiff produces: (1) a human-readable semantic diff report (components, nets, routing), (2) visual PNG overlays highlighting pixel-level and component-level changes, and (3) an optional local web viewer for browsing results interactively.
+- **The User:** Hardware/PCB engineers doing design reviews, running CI on board files, or auditing changes before manufacturing handoff.
 
 ---
 
-# Core Features Implemented
+## 2. The Tech Stack
 
-## 1. PCB Parsing
+| Layer | Technology |
+| :--- | :--- |
+| CLI entrypoint | Python + Click |
+| PCB parsing | Custom S-expression parser (`sexp_parser.py`) |
+| Diff engine | Pure Python (set/dict comparisons) |
+| Visual export | `kicad-cli` (SVG) → `cairosvg` (PNG) |
+| Image diffing | OpenCV (`cv2`) + NumPy |
+| Connectivity analysis | Custom graph builder |
+| Web viewer | Flask + Jinja2 (rendered HTML string) |
+| Viewer frontend | Vanilla JS + CSS (no framework) |
+| BOM Generator | Pure Python (grouping logic) |
+| Supply Chain | Simulated ERP Service |
 
-PCB files are parsed using a **custom S-expression parser**.
+**External tools required at runtime:** `kicad-cli` (must be on PATH), `cairosvg`, `opencv-python`, `flask`, `click`.
 
-KiCad PCB files are structured as nested S-expressions such as:
+| RAG Layer | Technology |
+| :--- | :--- |
+| LLM Orchestration | LlamaIndex / Custom ChatEngine |
+| Vector Database | FAISS (local index) |
+| Embeddings | OpenAI (`text-embedding-3-small`) |
+| API Framework | FastAPI |
+| Git Integration | GitPython / Subprocess |
 
-```
-(footprint
-  (at 10 10)
-  (fp_text reference "R1")
-)
-```
-
-The parser converts this structure into Python objects.
-
-### Parsed Data Model
-
-```
-PCBData
- ├ components
- ├ nets
- ├ traces
- └ vias
-```
-
-### Models
-
-Defined in:
-
-```
-fluxdiff/models/pcb_models.py
-```
-
-Data classes:
-
-```
-Component
-Pad
-Net
-Trace
-Via
-PCBData
-DiffResult
-```
 
 ---
 
-# 2. Semantic Diff Engine
+## 3. Core Architecture & Mental Model
 
-Located in:
-
-```
-fluxdiff/diff/diff_engine.py
-```
-
-Compares two `PCBData` objects.
-
-### Detects
-
-Component changes:
-
-- added components
-- removed components
-- moved components
-- rotation changes
-- footprint changes
-- layer changes
-- value changes
-
-Net connectivity:
-
-- pad net changes
-- pad disconnections
-
-Routing:
-
-- trace additions
-- trace removals
-- via additions
-- via removals
-
-### Thresholds
+### Data Flow
 
 ```
-MOVE_THRESHOLD = 0.05 mm
-ROT_THRESHOLD = 1 degree
-TRACE_ROUND = 5 decimal precision
+.kicad_pcb file
+    → sexp_parser.parse_sexp()          # Raw S-expression → Node AST
+    → pcb_parser.parse_pcb()            # AST → PCBData (components, nets, traces, vias)
+    → diff_engine.compare_pcbs()        # PCBData × 2 → DiffResult
+        ├── component_diff()            # UUID-first matching, then attribute comparison
+        ├── net_diff()                  # Pad→net mapping changes
+        ├── routing_diff()              # Trace/via set diff
+        ├── enrich_traces_with_connectivity()  # Snap trace endpoints to nearest pad
+        ├── build_connectivity_graph()  # net → {(ref, pad)} graph
+        ├── compare_connectivity()      # Graph delta messages
+        └── run_erc_checks()            # Basic ERC on new graph
+    → export_pcb_png()                  # kicad-cli SVG → cairosvg PNG
+    → generate_visual_diff()            # Pixel-level before/after overlay
+    → generate_component_visual_diff()  # Component-annotated overlay
+    → diff_report.txt + output PNGs
+    → (optional) Flask viewer server
+
+### RAG Data Flow (Knowledge Acquisition)
+
+```
+Git Commit History
+    → GitLoader.get_commits()           # Fetch commit hashes & metadata
+    → DiffGenerator.generate_diff()     # For each pair: git show → temp file → FluxDiff CLI
+    → DocumentBuilder.build()           # DiffSummary + CommitInfo → RAGDocument
+    → EmbeddingClient.get_embeddings()  # OpenAI API
+    → FAISS.add_documents()             # Update local vector index in rag_db/
 ```
 
-### Output Structure
+### RAG Query Flow (Conversation)
 
 ```
-DiffResult
- ├ component_changes
- ├ net_changes
- └ routing_changes
+User Query
+    → ChatEngine.ask()
+        → Retriever.retrieve()          # Similarity search in FAISS
+        → ChatMemory.get_context()      # Fetch session history
+        → build_rag_prompt()            # Inject context + history into template
+        → LLMClient.generate()          # OpenAI (gpt-4o-mini)
+    → ChatResponse (Answer + Sources)
 ```
+
+```
+
+### Key Entities
+
+```python
+# All defined in fluxdiff/models/pcb_models.py
+
+PCBData         # Top-level container: components, nets, traces, vias
+Component       # ref, value, footprint, x, y, rotation, layer, pads[], uuid
+Pad             # number (string), net (string name)
+Net             # net_id (int), name (string)
+Trace           # layer, start (x,y), end (x,y), net; + enriched: start_ref/pad, end_ref/pad
+Via             # x, y, net
+DiffResult      # component_changes[], net_changes[], routing_changes[], summary
+```
+
+### State Management
+
+- **No persistent state.** Every run is stateless; all data lives in Python objects for the duration of one CLI invocation.
+- **Output directory `./output/`** is the only side effect: PNGs and `diff_report.txt` written there.
+- **Flask viewer** stores `DiffResult` in `app.config["DIFF_RESULT"]` (thread-safe); it is never written to disk.
+
+### Coordinate System
+
+- KiCad uses **millimetres** for all positions.
+- PNG pixels are produced by `kicad-cli` SVG at 96 DPI, then `cairosvg` at `scale=4.0`.
+- The exact conversion used in `component_diff.py`: `PIXELS_PER_MM = (96 / 25.4) * 4.0 ≈ 15.118`
+- **All geometry comparisons happen in mm.** Never compare raw pixel values to component coordinates.
 
 ---
 
-# 3. Visual Diff Generation
+## 4. Code Standards & Patterns
 
-Located in:
+### Module Responsibilities (strict separation)
 
-```
-fluxdiff/visual/
-```
+| Module | Responsibility |
+| :--- | :--- |
+| `parser/sexp_parser.py` | Tokenise + parse S-expressions into `Node` AST. No PCB logic. |
+| `parser/pcb_parser.py` | Walk AST, extract PCB domain objects. No diff logic. |
+| `models/pcb_models.py` | Pure dataclasses. No methods, no business logic. |
+| `diff/diff_engine.py` | All diffing. No I/O, no image ops. Returns `DiffResult`. |
+| `analysis/` | Connectivity graph, ERC checks, trace enrichment, geometry utilities. |
+| `visual/` | Image export and overlay generation. No diff logic. |
+| `viewer/server.py` | Flask app. Reads `DiffResult` from `app.config`. No diff logic. |
+| `analysis/bom_generator.py` | Generates grouped Bill of Materials from PCB components. |
+| `cli/main.py` | Orchestration only. Calls all other modules in sequence. |
 
-## PCB Export
+### Component Identity: UUID First
 
-Uses KiCad CLI to export board images.
+- KiCad footprints have a `uuid` field. **Always use UUID as the primary identity key** when matching components across before/after boards.
+- Ref-based matching is a fallback only (for old boards without UUIDs).
+- If one board has UUIDs and the other does not, emit a `[WARNING]` and fall back to ref matching for both.
+- Duplicate refs (KiCad annotation errors) are **not dropped** — both are included, disambiguated by UUID suffix in output labels.
 
-```
-kicad-cli pcb export svg
-```
+### Error Handling
 
-Images generated:
+- All image export steps are wrapped in `try/except` in `cli/main.py`. A failed image export logs `[WARNING]` and skips visual diff steps; the semantic diff always runs.
+- `kicad_export.py` raises `RuntimeError` immediately on any failure — never silently continues with a corrupt/empty PNG.
+- `sexp_parser.py` raises `ValueError` on malformed S-expressions (unclosed parens, unexpected `)`) — never returns partial trees.
+- Use `[WARNING]`, `[INFO]`, `[ERROR]` prefixes on all print statements for machine-parseable log levels.
 
-```
-before.png
-after.png
-```
+### Naming Conventions
 
-## Visual Difference
+- Diff message strings follow a strict prefix pattern: `"Component added:"`, `"Component removed:"`, `"Component moved:"`, `"CRITICAL:"`, `"WARNING:"`, `"INFO:"`, `"CONNECTIVITY:"`, `"ERC:"`. Do not invent new prefixes.
+- Internal helper functions are prefixed with `_` (e.g., `_build_component_map`, `_label`, `_pos_equal`).
 
-OpenCV computes differences between images.
+### Thresholds (defined at top of `diff_engine.py`)
 
-Generated file:
-
-```
-diff_overlay.png
-```
-
-This highlights layout changes.
-
----
-
-# 4. Component Visual Diff
-
-Module:
-
-```
-fluxdiff/visual/component_diff.py
+```python
+MOVE_THRESHOLD = 0.05   # mm — minimum displacement to report a component as moved
+ROT_THRESHOLD  = 1.0    # degrees — minimum rotation delta to report
+TRACE_ROUND    = 5      # decimal places for trace coordinate hashing
 ```
 
-Purpose:
-
-Draw bounding boxes around moved components.
-
-Expected output:
-
-```
-component_diff.png
-```
-
-Current status:
-
-Component parsing is incomplete, so component list is empty.
-
-```
-Before components: 0
-After components: 0
-```
-
-Therefore `component_diff.png` is not currently generated.
-
----
-
-# 5. Web Viewer
-
-Located in:
-
-```
-fluxdiff/viewer/server.py
-```
-
-Flask-based UI.
-
-Viewer displays:
-
-```
-Before board
-After board
-Diff overlay
-```
-
-Recently upgraded to include:
-
-### Interactive Before/After Slider
-
-Users can drag to compare PCB revisions visually.
-
-Runs at:
-
-```
-http://localhost:5000
+```python
+TOLERANCE = 0.8  # mm (geometry.py) — snap radius for trace endpoint → pad matching
 ```
 
 ---
 
-# 6. CLI Tool
-
-Entry point:
-
-```
-fluxdiff/cli/main.py
-```
-
-Example usage:
-
-```
-python -m fluxdiff.cli.main before.kicad_pcb after.kicad_pcb
-```
-
-Launch viewer:
-
-```
-python -m fluxdiff.cli.main before.kicad_pcb after.kicad_pcb --viewer
-```
-
----
-
-# 7. Output Files
-
-Generated in:
-
-```
-output/
-```
-
-Files:
-
-```
-before.png
-after.png
-diff_overlay.png
-component_diff.png (not yet working)
-diff_report.txt
-```
-
-Example report:
-
-```
-PCB DIFF REPORT
-
-=== COMPONENT CHANGES ===
-Component R1 moved
-
-=== NET CHANGES ===
-Pad R2 changed from GND -> VCC
-
-=== ROUTING CHANGES ===
-Trace added
-Via removed
-```
-
----
-
-# 8. GitHub Integration
-
-Workflow file:
-
-```
-.github/workflows/pcb-diff.yml
-```
-
-Triggers when a Pull Request modifies:
-
-```
-*.kicad_pcb
-```
-
-### Workflow Steps
-
-1. checkout repository
-2. install Python
-3. install dependencies
-4. install KiCad CLI
-5. run FluxDiff
-6. upload artifacts
-7. post PR comment
-
-### Artifacts Uploaded
-
-```
-pcb-diff
- ├ before.png
- ├ after.png
- ├ diff_overlay.png
- └ diff_report.txt
-```
-
-### PR Comment
-
-```
-FluxDiff PCB Analysis
-
-PCB layout changes detected.
-
-Download visual diff artifacts from this workflow run.
-```
-
----
-
-# Project Structure
+## 5. File & Folder Map
 
 ```
 fluxdiff/
-│
-├ cli/
-│  └ main.py
-│
-├ diff/
-│  └ diff_engine.py
-│
-├ models/
-│  └ pcb_models.py
-│
-├ parser/
-│  ├ pcb_parser.py
-│  └ sexp_parser.py
-│
-├ visual/
-│  ├ image_diff.py
-│  ├ component_diff.py
-│  └ kicad_export.py
-│
-├ viewer/
-│  └ server.py
-│
- test_boards/
- output/
- docs/
- .github/workflows/
+├── cli/
+│   └── main.py              # Click CLI entrypoint; orchestrates everything
+├── models/
+│   └── pcb_models.py        # All dataclasses: PCBData, Component, Trace, Via, Net, DiffResult
+├── parser/
+│   ├── sexp_parser.py       # S-expression tokeniser/parser → Node AST
+│   └── pcb_parser.py        # AST → PCBData domain objects
+├── diff/
+│   └── diff_engine.py       # compare_pcbs() and all sub-diff functions
+├── analysis/
+│   ├── bom_generator.py       # Grouped BOM (value, footprint) generation
+│   ├── connectivity_graph.py  # build_connectivity_graph(), compare_connectivity()
+├── supply_chain/
+│   ├── erp_service.py         # Simulated ERP stock fetching
+│   ├── supply_checker.py      # BOM vs ERP stock analysis
+│   ├── erc_checker.py         # run_erc_checks() — basic ERC rules
+│   ├── geometry.py            # distance(), build_pad_index(), find_nearest_pad()
+│   └── trace_connectivity.py  # enrich_traces_with_connectivity()
+├── visual/
+│   ├── kicad_export.py        # kicad-cli + cairosvg → PNG
+│   ├── image_diff.py          # Pixel-level before/after overlay
+│   └── component_diff.py      # Component-annotated visual overlay
+└── viewer/
+    diff_report.txt
+├── fluxdiff/rag/            # LLM-powered insights system
+│   ├── api/                 # FastAPI server (server.py)
+│   ├── chat/                # Conversation logic (chat_engine.py, memory.py)
+│   ├── ingest/              # Repository indexing logic (git_loader.py, diff_generator.py)
+│   ├── llm/                 # OpenAI client wrappers
+│   ├── retrieval/           # Vector search logic
+│   └── schemas.py           # RAG-specific Pydantic/dataclass models
+└── rag_db/                  # Local FAISS vector storage (gitignored)
 ```
 
 ---
 
-# Environment Setup
+## 6. Critical Business Logic (The "Gotchas")
 
-Python version:
+- **`REF**` is not a real ref.** Footprints with `ref == "REF**"` have not been annotated in KiCad. They are silently skipped in all component maps, net maps, and visual overlays. If ALL components have `REF**`, the tool warns the user and skips component/net diff (routing diff still runs).
 
-```
-Python 3.10+
-```
+- **UUID matching survives re-annotation.** If R5 is renamed to R6 between revisions but its UUID is unchanged, the diff engine correctly reports `"Component re-annotated: R5 -> R6"` rather than a spurious remove+add pair. This only works when matching by UUID.
 
-Install dependencies:
+- **Trace snapping uses net-filtered geometry.** `find_nearest_pad()` only considers pads on the same net as the trace. Without this filter, traces routed near pads of different nets produce phantom connectivity entries. Do not remove the `net=trace.net` argument.
 
-```
-pip install opencv-python numpy pillow click flask
-```
+- **Visual diff pixel coordinates use the exact scale factor.** `PIXELS_PER_MM = (96 / 25.4) * 4.0` in `component_diff.py` must match the `scale=4.0` argument passed to `cairosvg.svg2png()` in `kicad_export.py`. Changing either without the other will misalign all component markers on the visual overlay.
 
-or
+- **Flask `app.config` is the only safe place for diff state.** Never store `DiffResult` in a module-level global in `server.py` — it is not thread-safe. Always use `app.config["DIFF_RESULT"]`.
 
-```
-pip install -r requirements.txt
-```
+- **Swap detection is mutual.** Two components are reported as a swap only if A moved to B's old position AND B moved to A's old position (within `MOVE_THRESHOLD`). Swapped components are excluded from per-attribute modified checks to avoid double-reporting.
+
+- **ERC deduplication is set-based.** `run_erc_checks()` returns a list; the diff engine takes the set difference `erc_new - erc_old` so only *newly introduced* ERC issues are reported. Pre-existing ERC issues are ignored.
 
 ---
 
-# System Requirements
+## 7. Internal API Routes
 
-KiCad CLI must be installed.
+| Route | Method | Purpose | Response |
+| :--- | :--- | :--- | :--- |
+| `/` | GET | HTML viewer page | Rendered HTML with image list |
+| `/api/diff` | GET | Structured diff data | `{ components[], nets[], routing[], summary }` |
+| `/api/bom` | GET | Grouped BOM data | `[ { value, footprint, count, refs[] } ]` |
+| `/images/<filename>` | GET | Serve output PNGs | PNG file from `./output/` |
 
-Mac example path:
+### FluxDiff RAG API (Port 8000)
 
-```
-/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli
-```
-
-Verify installation:
-
-```
-kicad-cli --version
-```
-
----
-
-# Example Run
-
-```
-python -m fluxdiff.cli.main test_boards/before.kicad_pcb test_boards/after.kicad_pcb --viewer
-```
-
-Console output:
-
-```
-Visual diff generated: output/diff_overlay.png
-Diff report written to: output/diff_report.txt
-```
-
-Viewer:
-
-```
-http://localhost:5000
-```
-
----
-
-# Known Limitations
-
-### Component Parsing Issue
-
-Current parser does not correctly extract components from S-expression tree.
-
-Debug output:
-
-```
-Before components: 0
-After components: 0
-```
-
-Needs improvement in:
-
-```
-parser/sexp_parser.py
-parser/pcb_parser.py
-```
-
-This affects:
-
-```
-component_diff.png
-```
-
----
-
-# Future Improvements
-
-Parser Improvements
-
-- fix component extraction
-
-Bounding Box Detection
-
-- detect real component footprint area
-
-Net Graph Analysis
-
-- compare electrical connectivity
-
-Multi-layer Routing Diff
-
-- layer specific diffing
-
-GitHub PR Image Preview
-
-- embed diff image in PR comments
-
-Viewer Improvements
-
-- zoom
-- pan
-- highlight changed areas
-
----
-
-# Current Development State
-
-The system currently supports:
-
-- PCB semantic diff
-- visual OpenCV diff
-- CLI execution
-- interactive web viewer
-- GitHub CI automation
-
-Component-level highlighting is pending parser improvements.
-
----
-
-# Developer
-
-Utkarsh Bansal
-
-MERN stack developer building Mentox and exploring hardware tooling.
-
----
-
-# Instructions for Next Chat
-
-Continue development of FluxDiff.
-
-Immediate priorities:
-
-1. Fix component parsing so components list is populated.
-2. Enable generation of component_diff.png.
-3. Improve viewer visualization if needed.
-
-All other systems are functional.
+| Route | Method | Purpose | Payload |
+| :--- | :--- | :--- | :--- |
+| `/chat` | POST | Conversational AI | `{ "query": "..." }` |
 
 
 ---
 
-# ARCHITECTURE.md
+## 8. Anti-Patterns — Do NOT Do These
 
-## High Level Architecture
-
-FluxDiff is organized as a modular pipeline that converts KiCad PCB files into structured data, compares them semantically, and produces visual and textual diff outputs.
-
-```
-KiCad PCB (.kicad_pcb)
-        │
-        ▼
-S‑Expression Parser
-(parser/sexp_parser.py)
-        │
-        ▼
-PCB Parser
-(parser/pcb_parser.py)
-        │
-        ▼
-PCBData Model
-(models/pcb_models.py)
-        │
-        ▼
-Diff Engine
-(diff/diff_engine.py)
-        │
-        ▼
-Visual Generators
-(visual/)
-        │
-        ├── image_diff.py
-        ├── component_diff.py
-        └── kicad_export.py
-        │
-        ▼
-Outputs
-(before.png, after.png, diff_overlay.png, diff_report.txt)
-        │
-        ▼
-Viewer
-(viewer/server.py)
-        │
-        ▼
-GitHub Automation
-(.github/workflows/pcb-diff.yml)
-```
+- **Do NOT** use `ref` as the primary component identity key when UUIDs are available. Refs change on re-annotation; UUIDs are stable.
+- **Do NOT** drop duplicate-ref components. Warn, but include both (keyed by UUID).
+- **Do NOT** call `cv2.imwrite` without checking the return value or verifying the file exists and is non-empty afterward.
+- **Do NOT** snap trace endpoints to pads on different nets (`find_nearest_pad` must always receive `net=trace.net`).
+- **Do NOT** store mutable state at module level in `server.py`. Use `app.config`.
+- **Do NOT** continue the visual diff pipeline after a PNG export failure — raise immediately so the caller can catch and warn.
+- **Do NOT** add a `"CONNECTIVITY:"` prefix inside `compare_connectivity()` — the caller in `diff_engine.py` adds it via f-string.
+- **Do NOT** use `WidthType.PERCENTAGE` in any future docx output (breaks Google Docs).
+- **Do NOT** invent new diff message prefixes beyond the established set (`CRITICAL`, `WARNING`, `INFO`, `CONNECTIVITY`, `ERC`).
 
 ---
 
-## Module Responsibilities
-
-### parser/
-Responsible for converting KiCad S‑expression files into structured Python objects.
-
-Components:
-
-- sexp_parser.py → generic S‑expression tree parser
-- pcb_parser.py → extracts components, nets, traces, vias
-
-Output:
-
-```
-PCBData
-```
-
----
-
-### models/
-Defines all data structures used across the system.
-
-Important classes:
-
-```
-Component
-Pad
-Net
-Trace
-Via
-PCBData
-DiffResult
-```
-
-These models decouple parsing from diff logic.
-
----
-
-### diff/
-Contains semantic comparison logic.
-
-Main file:
-
-```
-diff_engine.py
-```
-
-Responsibilities:
-
-- detect component movement
-- detect value / footprint changes
-- detect routing differences
-- detect net connectivity changes
-
-Output:
-
-```
-DiffResult
-```
-
----
-
-### visual/
-Responsible for generating visual representations.
-
-Modules:
-
-image_diff.py
-
-- compares rendered board images using OpenCV
-
-component_diff.py
-
-- highlights moved components
-
-kicad_export.py
-
-- exports board images using KiCad CLI
-
----
-
-### viewer/
-Contains the Flask web viewer.
-
-Features:
-
-- display before board
-- display after board
-- show diff overlay
-- interactive slider comparison
-
-Server file:
-
-```
-viewer/server.py
-```
-
----
-
-### cli/
-Entry point for the application.
-
-```
-cli/main.py
-```
-
-Responsibilities:
-
-- orchestrate full pipeline
-- run parser
-- run diff engine
-- generate images
-- optionally launch viewer
-
----
-
-### GitHub Integration
-
-Workflow file:
-
-```
-.github/workflows/pcb-diff.yml
-```
-
-Responsibilities:
-
-- detect PCB file changes in PR
-- run FluxDiff
-- upload artifacts
-- comment on pull request
-
----
-
-# DEV_ROADMAP.md
-
-## Phase 1 – MVP (Completed)
-
-Features implemented:
-
-- S‑expression PCB parser
-- semantic diff engine
-- visual OpenCV diff
-- CLI tool
-- Flask viewer
-- GitHub PR automation
-
-This phase produces:
-
-```
-before.png
-after.png
-diff_overlay.png
-diff_report.txt
-```
-
----
-
-## Phase 2 – Parser Improvements
-
-Goals:
-
-- fix component extraction
-- ensure components list is populated
-- enable component_diff.png generation
-
-Tasks:
-
-1. inspect S‑expression AST output
-2. update pcb_parser extraction rules
-3. support KiCad module + footprint formats
-
-Expected result:
-
-```
-component_diff.png
-```
-
----
-
-## Phase 3 – Component Visual Highlighting
-
-Enhancements:
-
-- compute component bounding boxes
-- draw accurate highlight regions
-- label components with reference IDs
-
-Potential improvements:
-
-- footprint size estimation
-- orientation-aware boxes
-
----
-
-## Phase 4 – Connectivity Analysis
-
-Implement electrical connectivity graph.
-
-Steps:
-
-1. build net graph
-2. compare connectivity graphs
-3. detect logical circuit changes
-
-This enables detection of:
-
-- broken connections
-- unintended shorts
-- topology changes
-
----
-
-## Phase 5 – Multi-Layer Routing Diff
-
-Enhancements:
-
-- analyze copper layers independently
-- detect layer-specific routing changes
-
-Features:
-
-- per-layer diff views
-- layer toggles in viewer
-
----
-
-## Phase 6 – Viewer Improvements
-
-Planned features:
-
-- zoom and pan
-- component click highlighting
-- routing path visualization
-- layer toggling
-
-UI inspiration:
-
-- GitHub image comparison
-- PCB review tools
-
----
-
-## Phase 7 – Advanced GitHub Integration
-
-Future improvements:
-
-- embed diff images directly in PR comments
-- auto-detect old vs new PCB revisions
-- multi-file PCB diff support
-
-Example PR comment:
-
-```
-FluxDiff PCB Analysis
-
-Components changed: 2
-Routing changes: 5
-Net changes: 1
-```
-
----
-
-## Phase 8 – Production Hardening
-
-Long-term goals:
-
-- packaging as pip module
-- Docker container
-- scalable CI usage
-
-Potential CLI install:
-
-```
-pip install fluxdiff
-fluxdiff before.kicad_pcb after.kicad_pcb
-```
-
----
-
-## Phase 9 – Long-Term Vision
-
-Transform FluxDiff into a full **hardware code review tool**.
-
-Possible capabilities:
-
-- schematic diff
-- PCB layout diff
-- design rule comparison
-- manufacturing change detection
-
-Target users:
-
-- hardware teams
-- PCB designers
-- open hardware projects
-
----
-
-## Immediate Next Task
-
-Fix component parsing so the system produces:
-
-```
-component_diff.png
-```
-
-Once parser works, the entire pipeline becomes fully functional.
-
+## 9. Current Progress & Roadmap
+
+- ✅ **S-expression parser** — robust tokeniser/parser with malformed-input error handling
+- ✅ **PCB parser** — extracts components (with UUID), nets, traces, vias, pads
+- ✅ **Semantic diff engine** — component, net, routing, swap detection, re-annotation detection
+- ✅ **Connectivity graph + ERC** — net-level graph diff and basic electrical rule checks
+- ✅ **Visual diff pipeline** — kicad-cli → cairosvg → OpenCV pixel overlay + component overlay
+- ✅ **BOM Generator** — Automatic grouping of components by value/footprint for fabrication
+- ✅ **Flask web viewer** — image display + JSON diff API + interactive JS panel
+- ✅ **FluxDiff RAG** — Commit-based indexing, FAISS retrieval, and FastAPI chat interface
+
+- 🚧 **In Progress:** Viewer UX polish — zoom/pan JS (`pcb_zoom_pan.js`), panel toggle buttons (HTML template in `server.py`), dark-mode grid layout
+- 🚧 **In Progress (RAG):** Automated incremental indexing on new commits; source-tracking UI in frontend
+
+- 📋 **Next Up:**
+  - Pad-level position offsets (currently pads are approximated at component origin; KiCad exposes real pad offsets in the S-expression)
+  - Board outline / Edge.Cuts diff
+  - CI-friendly JSON output mode (`--format json`)
+  - Configurable layer selection for `kicad-cli` export

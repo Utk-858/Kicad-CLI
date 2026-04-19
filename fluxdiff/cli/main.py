@@ -6,6 +6,10 @@ from fluxdiff.diff.diff_engine import compare_pcbs
 from fluxdiff.visual.kicad_export import export_pcb_png
 from fluxdiff.visual.image_diff import generate_visual_diff
 from fluxdiff.visual.component_diff import generate_component_visual_diff
+from fluxdiff.analysis.bom_generator import generate_bom
+from fluxdiff.supply_chain.supply_checker import check_bom_with_erp
+from dotenv import load_dotenv
+load_dotenv()
 
 @click.command()
 @click.argument("before_file", type=click.Path(exists=True))
@@ -103,7 +107,14 @@ def main(before_file, after_file, viewer):
         try:
             from fluxdiff.viewer.server import run_viewer_server
             print("Opening PCB diff viewer at http://localhost:5000")
-            run_viewer_server(diff_report)
+            
+            # Generate BOM for the updated board
+            bom = generate_bom(after_pcb.components)
+            
+            # Simulate supply chain availability
+            supply_report = check_bom_with_erp(bom)
+            
+            run_viewer_server(diff_report, bom, supply_report)
         except Exception as e:
             print("[ERROR] Could not launch viewer:", e)
 

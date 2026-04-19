@@ -1,111 +1,112 @@
-## Fluxlink Visual Diff
+# 🏗️ FluxDiff: Semantic & Visual KiCad PCB Review
 
-Fluxlink Visual Diff is a tool for comparing two KiCad PCB layouts. It parses `.kicad_pcb` files, computes a semantic diff (components, nets, routing), generates visual overlays, and optionally opens a browser-based viewer to explore the differences.
+FluxDiff is a next-generation tool for **semantic and visual comparison** of KiCad PCB files (`.kicad_pcb`). It bridges the gap between raw S-expression noise and meaningful hardware review by providing structured reports, pixel-perfect overlays, and LLM-powered insights.
 
-### Features
+---
 
-- **Semantic diff**: Detects changes in components, nets, and routing between two PCB revisions.
-- **Visual overlays**:
-  - `before.png` / `after.png`: Rendered boards.
-  - `diff_overlay.png`: Pixel-based visual diff between boards.
-  - `component_diff.png`: Highlights added, removed, and moved components.
-- **HTML viewer**: Lightweight Flask viewer to inspect all generated images side by side.
+## 🚀 Key Features
 
-## Requirements
+### 1. Semantic Diff Engine
+- **Component Matching**: Matches components via UUID first (stable across re-annotations) and falls back to Ref.
+- **Attribute Detection**: Highlights movements (within 0.05mm), rotations, value changes, and footprint swaps.
+- **Net & Connectivity**: Analyzes pad-to-net mapping and detects broken connections or unintended shorts.
+- **Routing Analysis**: Detailed set-diff for traces and vias, including snapping logic to nearest pads.
 
-- **Python**: 3.10+ (a recent 3.x is recommended)
-- **OS**: macOS / Linux (Windows likely works but is not actively tested)
-- **Dependencies**: Installed via `pip` from `fluxdiff/requirements.txt`:
-  - `opencv-python`
-  - `numpy`
-  - `pillow`
-  - `click`
-  - `flask`
+### 2. Visual Diff Suite
+- **Pixel Overlay**: Generates a composite image highlighting even the smallest layout shifts using OpenCV.
+- **Component Highlighting**: Annotated overlays showing added (green), removed (red), and moved (yellow) components.
+- **SVG to PNG Pipeline**: Uses `kicad-cli` and `cairosvg` for high-fidelity board renders.
 
-You also need KiCad PCB files in the modern `.kicad_pcb` S‑expression format (KiCad 5 or 6+).
+### 3. Fabrication & Supply Chain
+- **BOM Generator**: Automatically groups components by value and footprint. Cleans footprint metadata for fabrication readiness.
+- **ERP Simulation**: Integrated supply chain checker that simulates stock availability (OK, WARNING, CRITICAL) for your BOM.
 
-## Installation
+### 4. FluxDiff RAG (AI Chat)
+- **Repo-Aware Chat**: Leveraging FAISS and OpenAI to provide a chat interface that understands your board's commit history.
+- **Interactive Insights**: Ask the AI things like *"What changed in the power section between the last two commits?"* or *"Why was R105 moved?"*
 
-From the repository root:
+---
 
+## 🛠️ Tech Stack
+
+- **Backend**: Python 3.10+, Click (CLI), Flask (Viewer), FastAPI (RAG API).
+- **Computer Vision**: OpenCV, NumPy.
+- **Hardware Parsing**: Custom S-expression AST parser.
+- **AI/RAG**: OpenAI (GPT-4o-mini), FAISS, LlamaIndex-inspired orchestration.
+- **External Tools**: `kicad-cli` (v6+), `cairosvg`.
+
+---
+
+## 📦 Installation
+
+1. **Clone the repository**:
+   ```bash
+   git clone https://github.com/fluxdiff/fluxdiff.git
+   cd fluxdiff
+   ```
+
+2. **Setup Virtual Environment**:
+   ```bash
+   python -m venv venv
+   source venv/bin/activate
+   pip install -r requirements.txt
+   ```
+
+3. **Install KiCad**: Ensure `kicad-cli` is in your PATH.
+
+---
+
+## 🖥️ Usage
+
+### 1. Basic Semantic + Visual Diff
 ```bash
-python -m venv venv
-source venv/bin/activate  # on Windows: venv\Scripts\activate
-pip install -r fluxdiff/requirements.txt
+python -m fluxdiff.cli.main before.kicad_pcb after.kicad_pcb
 ```
 
-Make sure the repository root is on `PYTHONPATH` (running from the root and using `-m` takes care of this).
-
-## Usage
-
-From the repository root, run:
-
+### 2. Launch Interactive Viewer
 ```bash
-python -m fluxdiff.cli.main path/to/before.kicad_pcb path/to/after.kicad_pcb
+python -m fluxdiff.cli.main before.kicad_pcb after.kicad_pcb --viewer
 ```
 
-To also launch the browser viewer after generating the diff:
-
+### 3. Run RAG Chat Backend
 ```bash
-python -m fluxdiff.cli.main path/to/before.kicad_pcb path/to/after.kicad_pcb --viewer
+export PYTHONPATH=$PYTHONPATH:.
+uvicorn fluxdiff.rag.api.server:app --reload --port 8000
 ```
 
-### Command-line arguments
+---
 
-- **`before_file`**: Path to the “before” KiCad `.kicad_pcb` file.
-- **`after_file`**: Path to the “after” KiCad `.kicad_pcb` file.
-- **`--viewer`**: Optional flag. If set, starts a local Flask server and opens the PCB diff viewer in your browser.
+## 📂 File Structure
 
-Example:
-
-```bash
-python -m fluxdiff.cli.main examples/before.kicad_pcb examples/after.kicad_pcb --viewer
+```
+fluxdiff/
+├── cli/              # Orchestration entrypoint
+├── parser/           # S-expression & PCB domain parsers
+├── models/           # PCB Data Models
+├── diff/             # Pure semantic diff logic
+├── analysis/         # Connectivity graph, ERC, & BOM generator
+├── supply_chain/     # ERP simulation & supply checker
+├── visual/           # OpenCV image processing & KiCad export
+├── viewer/           # Flask-based web viewer
+└── rag/              # LLM-powered chat logic
 ```
 
-## Outputs
+---
 
-After running the CLI, an `output/` directory is created (or reused) in the repo root with:
+## 🗺️ Roadmap & Progress
 
-- **`before.png`**: Render of the “before” board.
-- **`after.png`**: Render of the “after” board.
-- **`diff_overlay.png`**: Visual diff overlay between before/after.
-- **`component_diff.png`**: Highlights added (green), removed (red), and moved (yellow) components.
-- **`diff_report.txt`**: Text summary including:
-  - `=== COMPONENT CHANGES ===`
-  - `=== NET CHANGES ===`
-  - `=== ROUTING CHANGES ===`
-  - A simple summary (counts per category).
+- [x] Semantic Diff Engine (Components, Nets, Traces)
+- [x] Visual Overlay Generation
+- [x] Interactive Flask Viewer
+- [x] Grouped BOM Generator
+- [x] Supply Chain / ERP simulation
+- [x] RAG Chat System over commit history
+- [ ] **In Progress**: Viewer UI Zoom/Pan & Dark Mode
+- [ ] **Next**: Board Outline (Edge.Cuts) Diff
+- [ ] **Next**: CI-friendly JSON export mode
 
-## Viewer
+---
 
-If you pass `--viewer`, the CLI starts a local Flask app that:
-
-- Serves the generated images from `output/`.
-- Opens `http://localhost:5000` in your browser.
-- Shows a layout with:
-  - Before PCB
-  - After PCB
-  - Visual Diff
-  - Component Diff
-
-You can also run the viewer directly (after generating images):
-
-```bash
-python -m fluxdiff.viewer.server
-```
-
-## Project Structure (high level)
-
-- `fluxdiff/cli/main.py` – CLI entrypoint; orchestrates parsing, diffing, image export, and optional viewer.
-- `fluxdiff/parser/pcb_parser.py` – Parses KiCad `.kicad_pcb` into internal `PCBData` (components, nets, traces, vias).
-- `fluxdiff/visual/component_diff.py` – Generates `component_diff.png`.
-- `fluxdiff/viewer/server.py` – Flask server backing the PCB diff viewer.
-- `fluxdiff/viewer/static/index.html` – HTML/JS for the richer viewer UI.
-- `fluxdiff/requirements.txt` – Python dependency list.
-
-## Limitations / Notes
-
-- Intended for KiCad S‑expression PCB files; other EDA formats are not supported.
-- Rendering to PNG relies on external KiCad export logic (`kicad_export`) and may require KiCad CLI/tools to be installed and available.
-- This is an early-stage tool; expect rough edges and incomplete coverage of all KiCad features.
+## 📝 License
+MIT License. Developed for the next generation of open hardware tooling.
 

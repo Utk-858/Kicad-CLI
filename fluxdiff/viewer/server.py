@@ -12,8 +12,10 @@ IMAGE_FILENAMES = [
     "diff_overlay.png",
 ]
 
-# 🔥 GLOBAL DIFF STORAGE
+# 🔥 GLOBAL DATA STORAGE
 diff_result_global = None
+bom_global = None
+supply_global = None
 
 
 # ---------- API ----------
@@ -27,6 +29,18 @@ def get_diff():
         "nets": diff_result_global.net_changes,
         "routing": diff_result_global.routing_changes
     })
+
+
+@app.route("/api/bom")
+def get_bom():
+    if bom_global is None:
+        return jsonify([])
+    return jsonify(bom_global)
+
+
+@app.route("/api/supply")
+def get_supply():
+    return jsonify(supply_global or [])
 
 
 # ---------- UI ----------
@@ -105,9 +119,9 @@ def index():
             /* CARD */
             .card {
                 background: #f8f9fa;
-                padding: 10px;
-                border-radius: 8px;
-                margin-bottom: 8px;
+                padding: 12px;
+                border-radius: 10px;
+                margin-bottom: 10px;
                 transition: 0.2s;
                 font-size: 14px;
             }
@@ -164,6 +178,16 @@ def index():
             <div class="section">
                 <h3 onclick="toggle('routing')">🛣 Routing</h3>
                 <div id="routing"></div>
+            </div>
+
+            <div class="section">
+                <h3 onclick="toggle('bom')">📦 BOM</h3>
+                <div id="bom"></div>
+            </div>
+
+            <div class="section">
+                <h3 onclick="toggle('supply')">🚛 Supply Chain</h3>
+                <div id="supply"></div>
             </div>
 
         </div>
@@ -234,6 +258,70 @@ def index():
         })
         .catch(err => console.error(err));
 
+    fetch("/api/bom")
+        .then(res => res.json())
+        .then(data => {
+            const container = document.getElementById("bom");
+
+            if (!data || data.length === 0) {
+                container.innerHTML = "<div class='card'>No BOM data</div>";
+                return;
+            }
+
+            data.forEach(item => {
+                const div = document.createElement("div");
+                div.className = "card";
+
+                div.innerHTML = `
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                        <b>${item.display_name}</b>
+                        <span style="background:#eee;padding:2px 6px;border-radius:6px;font-size:12px;">${item.type}</span>
+                    </div>
+                    <i>${item.footprint}</i><br>
+                    <b>Count:</b> ${item.count}<br>
+                    <b>Refs:</b> ${item.refs}
+                `;
+
+                container.appendChild(div);
+            });
+        })
+        .catch(err => console.error(err));
+
+    const container_supply = document.getElementById("supply");
+    container_supply.innerHTML = "<div class='card'>🔄 Syncing with ERP...</div>";
+
+    fetch("/api/supply")
+        .then(res => res.json())
+        .then(data => {
+            const container = document.getElementById("supply");
+
+            if (!data || data.length === 0) {
+                container.innerHTML = "<div class='card'>No supply data</div>";
+                return;
+            }
+
+            data.forEach(item => {
+                const div = document.createElement("div");
+
+                let color = "green";
+                if (item.status === "CRITICAL") color = "red";
+                else if (item.status === "WARNING") color = "orange";
+
+                div.className = "card";
+                div.innerHTML = `
+                    <b>${item.name}</b><br>
+                    Required: ${item.required}<br>
+                    Stock: ${item.stock}<br>
+                    <span style="color:${color};font-weight:bold;">
+                        ${item.status}
+                    </span>
+                `;
+
+                container.appendChild(div);
+            });
+        })
+        .catch(err => console.error(err));
+
     </script>
 
     </body>
@@ -249,10 +337,12 @@ def images(filename):
 
 
 # ---------- SERVER ----------
-def run_viewer_server(diff_result=None):
+def run_viewer_server(diff_result=None, bom=None, supply=None):
 
-    global diff_result_global
+    global diff_result_global, bom_global, supply_global
     diff_result_global = diff_result
+    bom_global = bom
+    supply_global = supply
 
     threading.Timer(
         1,
