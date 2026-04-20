@@ -30,3 +30,7 @@ def chat(req: ChatRequest):
         "answer": response.answer,
         "sources": response.sources
     }
+
+@app.get("/health")
+def health():
+    return {"status": "ok"} 
