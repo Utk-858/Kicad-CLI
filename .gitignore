@@ -19,7 +19,6 @@ env.bak/
 !.env.example
 
 # Vector DB & Cache
-rag_db/
 chat-ui/node_modules/
 chat-ui/dist/
 chat-ui/.next/
