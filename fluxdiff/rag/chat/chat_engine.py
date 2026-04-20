@@ -1,7 +1,5 @@
 # fluxdiff/rag/chat/chat_engine.py
 
-from multiprocessing import context
-
 from fluxdiff.rag.retrieval.retriever import Retriever
 from fluxdiff.rag.llm.llm_client import LLMClient
 from fluxdiff.rag.llm.prompt_templates import (
@@ -21,6 +19,10 @@ class ChatEngine:
     # -----------------------------
     # Simple chat
     # -----------------------------
+    def ask(self, query: str) -> ChatResponse:
+        """
+        Basic RAG pipeline
+        """
         # 0. Check for greetings or very short messages
         greetings = ["hi", "hello", "hey", "howdy", "greetings"]
         if query.lower().strip() in greetings:
