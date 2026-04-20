@@ -21,10 +21,12 @@ class ChatEngine:
     # -----------------------------
     # Simple chat
     # -----------------------------
-    def ask(self, query: str) -> ChatResponse:
-        """
-        Basic RAG pipeline
-        """
+        # 0. Check for greetings or very short messages
+        greetings = ["hi", "hello", "hey", "howdy", "greetings"]
+        if query.lower().strip() in greetings:
+            answer = self.llm.generate_response(f"The user said '{query}'. Respond with a friendly, professional greeting as a PCB Design Expert.")
+            self.memory.add(query, answer)
+            return ChatResponse(answer=answer, sources=[])
 
         # 1. Retrieve documents
         retrieval_result = self.retriever.retrieve(query)
