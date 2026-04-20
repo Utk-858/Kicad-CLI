@@ -365,7 +365,7 @@ export function ChatApp() {
 
         {/* Scrollable Chat Message List */}
         <main className="flex-1 min-h-0 overflow-y-auto w-full scroll-smooth">
-          <div className="mx-auto w-full max-w-3xl p-4 sm:p-6 space-y-8">
+          <div className="mx-auto w-full max-w-3xl p-3 sm:p-6 space-y-6 sm:space-y-8">
             
             {messages.length === 0 && (
               <div className="flex flex-col items-center justify-center h-full pt-20 pb-10">
@@ -384,13 +384,13 @@ export function ChatApp() {
                 <div className="flex w-full max-w-3xl gap-4 md:gap-6">
                   {/* Avatar Fixed on Left */}
                   <div
-                    className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-sm shadow-sm ring-1 ring-black/5 dark:ring-white/10 ${
+                    className={`flex h-7 w-7 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-sm shadow-sm ring-1 ring-black/5 dark:ring-white/10 ${
                       message.role === "user"
                         ? "bg-white text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
                         : "bg-blue-600 text-white"
                     }`}
                   >
-                    {message.role === "user" ? <UserIcon className="h-5 w-5" /> : <BotIcon className="h-5 w-5" />}
+                    {message.role === "user" ? <UserIcon className="h-4 w-4 sm:h-5 sm:w-5" /> : <BotIcon className="h-4 w-4 sm:h-5 sm:w-5" />}
                   </div>
 
                   {/* Message Content Area */}
@@ -444,47 +444,47 @@ export function ChatApp() {
         </main>
 
         {/* Input Dock (Bottom) */}
-        <div className="shrink-0 w-full bg-white dark:bg-zinc-900 pb-4 pt-2 sm:pb-6 z-10 transition-colors duration-300">
-          <div className="mx-auto flex w-full max-w-3xl px-4 sm:px-6">
-            <div className="relative flex w-full flex-col overflow-hidden rounded-2xl bg-zinc-100 dark:bg-zinc-800 border-none shadow-sm focus-within:ring-2 focus-within:ring-blue-500/50 transition-all duration-300">
+        <div className="shrink-0 w-full bg-white dark:bg-zinc-900 pb-3 pt-2 sm:pb-6 z-10 transition-colors duration-300">
+          <div className="mx-auto flex w-full max-w-3xl px-3 sm:px-6">
+            <div className="relative flex w-full flex-col overflow-hidden rounded-xl sm:rounded-2xl bg-zinc-100 dark:bg-zinc-800 border-none shadow-sm focus-within:ring-2 focus-within:ring-blue-500/50 transition-all duration-300">
               <textarea
                 ref={textareaRef}
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder="Message FluxLink..."
-                className="max-h-[200px] min-h-[56px] w-full resize-none bg-transparent py-4 pl-5 pr-14 text-[15px] leading-relaxed text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-500 dark:placeholder:text-zinc-400 focus:outline-none"
+                className="max-h-[200px] min-h-[50px] sm:min-h-[56px] w-full resize-none bg-transparent py-3 sm:py-4 pl-4 sm:pl-5 pr-12 sm:pr-14 text-sm sm:text-[15px] leading-relaxed text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-500 dark:placeholder:text-zinc-400 focus:outline-none"
                 rows={1}
               />
               
-              <div className="absolute bottom-2 right-2 flex items-center">
+              <div className="absolute bottom-1.5 sm:bottom-2 right-1.5 sm:right-2 flex items-center">
                 {(!isTyping && !isAnimating) ? (
                   <button
                     onClick={handleSend}
                     disabled={!inputValue.trim()}
-                    className={`flex h-10 w-10 items-center justify-center rounded-xl transition-all duration-300 ${
+                    className={`flex h-8 w-8 sm:h-10 sm:w-10 items-center justify-center rounded-lg sm:rounded-xl transition-all duration-300 ${
                       inputValue.trim()
                         ? "bg-zinc-900 text-white hover:bg-zinc-800 dark:bg-white dark:text-black dark:hover:bg-zinc-200 active:scale-95"
                         : "bg-transparent text-zinc-400 dark:text-zinc-600 cursor-not-allowed"
                     }`}
                     aria-label="Send message"
                   >
-                    <SendIcon className="h-4 w-4" />
+                    <SendIcon className="h-3.5 w-3.5 sm:h-4 w-4" />
                   </button>
                 ) : (
                   <button
                     onClick={handleStop}
-                    className="flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-900 text-white hover:bg-zinc-800 dark:bg-white dark:text-black dark:hover:bg-zinc-200 active:scale-95 transition-all duration-300"
+                    className="flex h-8 w-8 sm:h-10 sm:w-10 items-center justify-center rounded-lg sm:rounded-xl bg-zinc-900 text-white hover:bg-zinc-800 dark:bg-white dark:text-black dark:hover:bg-zinc-200 active:scale-95 transition-all duration-300"
                     aria-label="Stop generation"
                   >
-                    <SquareIcon className="h-4 w-4" />
+                    <SquareIcon className="h-3.5 w-3.5 sm:h-4 w-4" />
                   </button>
                 )}
               </div>
             </div>
           </div>
-          <div className="text-center mt-2.5 px-4">
-            <p className="text-[11px] font-medium text-zinc-400 dark:text-zinc-500">
+          <div className="text-center mt-2 px-4">
+            <p className="text-[10px] sm:text-[11px] font-medium text-zinc-400 dark:text-zinc-500">
               FluxLink can make mistakes. Consider verifying important information.
             </p>
           </div>
