@@ -8,7 +8,7 @@ RAG_CONFIG = {
     # =========================
     # REPO SETTINGS
     # =========================
-    "repo_path": "/Users/utkarshbansal/pcbs-test",  # change later
+    "repo_path": "/Users/utkarshbansal/KiParse",  # change later
 
     # =========================
     # EMBEDDING SETTINGS
