@@ -8,7 +8,7 @@ RAG_CONFIG = {
     # =========================
     # REPO SETTINGS
     # =========================
-    "repo_path": "/Users/utkarshbansal/Kicad-CLI",  # change later
+    "repo_path": "/Users/utkarshbansal/pcbs-test",  # change later
 
     # =========================
     # EMBEDDING SETTINGS
