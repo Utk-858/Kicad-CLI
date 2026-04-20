@@ -1,14 +1,14 @@
 {
   "builds": [
     {
-      "src": "api/server.py",
+      "src": "fluxdiff/rag/api/server.py",
       "use": "@vercel/python"
     }
   ],
   "routes": [
     {
       "src": "/(.*)",
-      "dest": "api/server.py"
+      "dest": "fluxdiff/rag/api/server.py"
     }
   ]
 }
