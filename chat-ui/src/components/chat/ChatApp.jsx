@@ -9,22 +9,29 @@ import {
   TrashIcon,
   PlusIcon,
   MessageSquareIcon,
-  MenuIcon
+  MenuIcon,
+  SquareIcon
 } from "../icons";
 
-const TypewriterText = ({ text, delay = 15 }) => {
+const TypewriterText = ({ text, delay = 15, onComplete, onUpdate, isStopped }) => {
   const [currentText, setCurrentText] = useState("");
   const [currentIndex, setCurrentIndex] = useState(0);
 
   useEffect(() => {
+    if (isStopped) return;
+
     if (currentIndex < text.length) {
       const timeout = setTimeout(() => {
-        setCurrentText((prev) => prev + text[currentIndex]);
+        const nextText = currentText + text[currentIndex];
+        setCurrentText(nextText);
         setCurrentIndex((prev) => prev + 1);
+        if (onUpdate) onUpdate(nextText);
       }, delay);
       return () => clearTimeout(timeout);
+    } else if (onComplete) {
+      onComplete();
     }
-  }, [currentIndex, delay, text]);
+  }, [currentIndex, delay, text, onComplete, onUpdate, isStopped, currentText]);
 
   return <p className="whitespace-pre-wrap">{currentText}</p>;
 };
@@ -89,9 +96,13 @@ export function ChatApp() {
   const [isTyping, setIsTyping] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false); // Mobile sidebar state
+  const [abortController, setAbortController] = useState(null);
+  const [isAnimating, setIsAnimating] = useState(false);
+  const [isStopped, setIsStopped] = useState(false);
   
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
+  const partialContentRef = useRef("");
 
   useEffect(() => {
     if (isDarkMode) {
@@ -135,9 +146,11 @@ export function ChatApp() {
   };
 
   const handleSend = async () => {
-    if (!inputValue.trim() || isTyping) return;
+    if (!inputValue.trim() || isTyping || isAnimating) return;
 
     const query = inputValue.trim();
+    setIsStopped(false);
+    partialContentRef.current = "";
     const newUserMessage = {
       id: Date.now(),
       role: "user",
@@ -145,9 +158,15 @@ export function ChatApp() {
       isNew: false,
     };
 
-    setMessages((prev) => [...prev, newUserMessage]);
+    setMessages((prev) => [
+      ...prev.map(m => ({ ...m, isNew: false })), 
+      newUserMessage
+    ]);
     setInputValue("");
     setIsTyping(true);
+
+    const controller = new AbortController();
+    setAbortController(controller);
 
     try {
       const response = await fetch("https://kicad-cli-five.vercel.app/chat", {
@@ -155,6 +174,7 @@ export function ChatApp() {
         headers: {
           "Content-Type": "application/json",
         },
+        signal: controller.signal,
         body: JSON.stringify({ query }),
       });
 
@@ -171,19 +191,50 @@ export function ChatApp() {
         sources: data.sources || [],
         isNew: true,
       };
-      setMessages((prev) => [...prev, newAssistantMessage]);
+      setMessages((prev) => [
+        ...prev.map(m => ({ ...m, isNew: false })), 
+        newAssistantMessage
+      ]);
+      setIsAnimating(true);
     } catch (error) {
-      console.error("Error fetching chat response:", error);
-      const errorMessage = {
-        id: Date.now() + 1,
-        role: "assistant",
-        content: "Sorry, I encountered an error connecting to the server. Please try again.",
-        isNew: true,
-      };
-      setMessages((prev) => [...prev, errorMessage]);
+      if (error.name === 'AbortError') {
+        console.log('Fetch aborted');
+      } else {
+        console.error("Error fetching chat response:", error);
+        const errorMessage = {
+          id: Date.now() + 1,
+          role: "assistant",
+          content: "Sorry, I encountered an error connecting to the server. Please try again.",
+          isNew: true,
+        };
+        setMessages((prev) => [...prev, errorMessage]);
+      }
     } finally {
       setIsTyping(false);
+      setAbortController(null);
     }
+  };
+
+  const handleStop = () => {
+    if (abortController) {
+      abortController.abort();
+    }
+    
+    // Truncate the message content to where it was stopped
+    setMessages(prev => {
+      const newMessages = [...prev];
+      const lastMsg = newMessages[newMessages.length - 1];
+      if (lastMsg && lastMsg.role === "assistant") {
+        lastMsg.content = partialContentRef.current;
+        lastMsg.isNew = false;
+      }
+      return newMessages;
+    });
+
+    setIsStopped(true);
+    setIsTyping(false);
+    setIsAnimating(false);
+    setAbortController(null);
   };
 
   const handleKeyDown = (e) => {
@@ -349,7 +400,12 @@ export function ChatApp() {
                     </div>
                     <div className="text-[15px] leading-relaxed text-zinc-800 dark:text-zinc-200 prose prose-zinc dark:prose-invert max-w-none">
                       {message.role === "assistant" && message.isNew ? (
-                        <TypewriterText text={message.content} />
+                        <TypewriterText 
+                          text={message.content} 
+                          onComplete={() => setIsAnimating(false)}
+                          onUpdate={(val) => partialContentRef.current = val}
+                          isStopped={isStopped}
+                        />
                       ) : (
                         <p className="whitespace-pre-wrap">{message.content}</p>
                       )}
@@ -402,18 +458,28 @@ export function ChatApp() {
               />
               
               <div className="absolute bottom-2 right-2 flex items-center">
-                <button
-                  onClick={handleSend}
-                  disabled={!inputValue.trim() || isTyping}
-                  className={`flex h-10 w-10 items-center justify-center rounded-xl transition-all duration-300 ${
-                    inputValue.trim() && !isTyping
-                      ? "bg-zinc-900 text-white hover:bg-zinc-800 dark:bg-white dark:text-black dark:hover:bg-zinc-200 active:scale-95"
-                      : "bg-transparent text-zinc-400 dark:text-zinc-600 cursor-not-allowed"
-                  }`}
-                  aria-label="Send message"
-                >
-                  <SendIcon className="h-4 w-4" />
-                </button>
+                {(!isTyping && !isAnimating) ? (
+                  <button
+                    onClick={handleSend}
+                    disabled={!inputValue.trim()}
+                    className={`flex h-10 w-10 items-center justify-center rounded-xl transition-all duration-300 ${
+                      inputValue.trim()
+                        ? "bg-zinc-900 text-white hover:bg-zinc-800 dark:bg-white dark:text-black dark:hover:bg-zinc-200 active:scale-95"
+                        : "bg-transparent text-zinc-400 dark:text-zinc-600 cursor-not-allowed"
+                    }`}
+                    aria-label="Send message"
+                  >
+                    <SendIcon className="h-4 w-4" />
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleStop}
+                    className="flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-900 text-white hover:bg-zinc-800 dark:bg-white dark:text-black dark:hover:bg-zinc-200 active:scale-95 transition-all duration-300"
+                    aria-label="Stop generation"
+                  >
+                    <SquareIcon className="h-4 w-4" />
+                  </button>
+                )}
               </div>
             </div>
           </div>
