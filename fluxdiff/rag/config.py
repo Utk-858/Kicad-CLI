@@ -8,7 +8,7 @@ RAG_CONFIG = {
     # =========================
     # REPO SETTINGS
     # =========================
-    "repo_path": "/Users/utkarshbansal/Chessboard-Hardware",  # change later
+    "repo_path": "/Users/utkarshbansal/KiCad-Like-a-Pro-Tutorial",  # change later
 
     # =========================
     # EMBEDDING SETTINGS
