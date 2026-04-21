@@ -30,27 +30,41 @@ class ChatEngine:
             self.memory.add(query, answer)
             return ChatResponse(answer=answer, sources=[])
 
-        # 1. Retrieve documents
+        # 1. Retrieve top-k documents
         retrieval_result = self.retriever.retrieve(query)
-
         documents = retrieval_result.documents
+
+        # 2. HYDRATION: If query is about the project/readme, force-fetch the structure/readme
+        repo_keywords = ["repo", "repository", "project", "readme", "structure", "folder", "structure"]
+        if any(kw in query.lower() for kw in repo_keywords):
+            # Special retrieval for core documents
+            core_docs = self.retriever.retrieve_by_type("project_structure")
+            readme_docs = self.retriever.retrieve_by_filename("README.md")
+            
+            # Add to top of documents list (avoid duplicates)
+            existing_contents = {d.content for d in documents}
+            for cd in (core_docs + readme_docs):
+                if cd.content not in existing_contents:
+                    documents.insert(0, cd)
+
+        # 3. Filter and clean
         documents = [
             d for d in documents
-            if d.content and "no changes" not in d.content.lower()
+            if d.content and (d.metadata.get("type") != "summary" or "no changes" not in d.content.lower())
         ]
 
-        # 2. Format context
+        # 4. Format context
         context = format_documents(documents)
 
-        # 3. Build prompt
+        # 5. Build prompt
         memory_context = self.memory.get_context()
         prompt = build_rag_prompt(context, query, memory_context)
 
-        # 4. Generate answer
+        # 6. Generate answer
         answer = self.llm.generate_response(prompt)
         self.memory.add(query, answer)
 
-        # 5. Prepare sources (metadata)
+        # 7. Prepare sources
         sources = [doc.metadata for doc in documents]
 
         return ChatResponse(

@@ -1,5 +1,6 @@
 # fluxdiff/rag/ingest/document_builder.py
 
+import os
 from typing import List
 from fluxdiff.rag.schemas import (
     RAGDocument,
@@ -166,4 +167,43 @@ Changes:
             "file": file_path
         }
 
+        return RAGDocument(content=content.strip(), metadata=metadata)
+
+    # -----------------------------
+    # SNAPSHOT DOCUMENT (Full File)
+    # -----------------------------
+    def build_snapshot_document(self, filename: str, content: str) -> RAGDocument:
+        """
+        Builds a document from the current content of a file (Snapshot).
+        """
+        metadata = {
+            "type": "file_snapshot",
+            "file": filename,
+            "filename": os.path.basename(filename)
+        }
+        
+        doc_content = f"FILE SNAPSHOT: {filename}\n\nCONTENT:\n{content}"
+        return RAGDocument(content=doc_content.strip(), metadata=metadata)
+
+    # -----------------------------
+    # CONVENIENCE WRAPPER
+    # -----------------------------
+    def build_commit_document(self, commit_obj) -> RAGDocument:
+        """
+        Wraps a GitPython commit object into a summary document.
+        """
+        content = f"""
+Commit: {commit_obj.hexsha}
+Message: {commit_obj.summary}
+Author: {commit_obj.author.name}
+Date: {commit_obj.committed_datetime}
+
+Full Message:
+{commit_obj.message}
+"""
+        metadata = {
+            "commit": commit_obj.hexsha,
+            "type": "commit_summary",
+            "source": "git_history"
+        }
         return RAGDocument(content=content.strip(), metadata=metadata)

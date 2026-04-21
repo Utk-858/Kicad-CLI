@@ -48,8 +48,6 @@ class VectorStore:
         self.index.add(vectors)
         self.documents.extend(documents)
 
-        self._save()
-
     # -----------------------------
     # Similarity search
     # -----------------------------
@@ -78,7 +76,7 @@ class VectorStore:
     # -----------------------------
     # Save DB
     # -----------------------------
-    def _save(self):
+    def save(self):
         if self.index:
             faiss.write_index(self.index, self.index_file)
 

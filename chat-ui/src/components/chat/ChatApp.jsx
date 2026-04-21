@@ -168,8 +168,10 @@ export function ChatApp() {
     const controller = new AbortController();
     setAbortController(controller);
 
+    const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+    
     try {
-      const response = await fetch("https://kicad-cli-five.vercel.app/chat", {
+      const response = await fetch(`${API_URL}/chat`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

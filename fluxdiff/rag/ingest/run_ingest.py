@@ -7,75 +7,136 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))))
 
 from fluxdiff.rag.ingest.git_loader import GitLoader
-from fluxdiff.rag.ingest.diff_generator import DiffGenerator
 from fluxdiff.rag.ingest.document_builder import DocumentBuilder
 from fluxdiff.rag.embedding.embedder import Embedder
 from fluxdiff.rag.embedding.vector_store import VectorStore
 from fluxdiff.rag.config import RAG_CONFIG
+from fluxdiff.rag.schemas import RAGDocument
+
+def chunk_text(text: str, chunk_size: int = 8000, overlap: int = 500):
+    """
+    Split large text into smaller chunks for LLM safety.
+    """
+    chunks = []
+    start = 0
+    while start < len(text):
+        end = start + chunk_size
+        chunks.append(text[start:end])
+        start += (chunk_size - overlap)
+    return chunks
+
+def generate_project_map(repo_path: str):
+    """
+    Creates a text-based map of the repository's folder structure.
+    """
+    structure = []
+    for root, dirs, files in os.walk(repo_path):
+        # Skip hidden folders and common noise
+        dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ['venv', 'node_modules', '__pycache__', 'rag_db']]
+        
+        level = root.replace(repo_path, '').count(os.sep)
+        indent = '  ' * level
+        structure.append(f"{indent}{os.path.basename(root) or './'}/")
+        
+        sub_indent = '  ' * (level + 1)
+        for f in files:
+            if not f.startswith('.') and not f.endswith(('.index', '.pkl', '.bin')):
+                structure.append(f"{sub_indent}{f}")
+
+    content = "PROJECT FOLDER STRUCTURE:\n\n" + "\n".join(structure)
+    
+    return RAGDocument(
+        content=content,
+        metadata={
+            "type": "project_structure",
+            "source": "filesystem_scan",
+            "filename": "root"
+        }
+    )
 
 def main():
     repo_path = RAG_CONFIG["repo_path"]
-    print(f"🚀 Starting ingestion for: {repo_path}")
+    print(f"🚀 Starting Deep Ingestion for: {repo_path}")
 
-    # 1. Load Commits
-    loader = GitLoader(repo_path)
-    commits = loader.get_commits(max_count=20) # Change limit as needed
-    print(f"Found {len(commits)} commits to process.")
+    if not os.path.exists(repo_path):
+        print(f"❌ Error: Repo path {repo_path} does not exist!")
+        return
 
-    # 2. Setup Modules
-    diff_gen = DiffGenerator(repo_path)
-    doc_builder = DocumentBuilder()
+    # 1. Setup Modules
+    builder = DocumentBuilder()
     embedder = Embedder()
-    store = VectorStore()
+    vector_store = VectorStore()
+    all_documents = []
 
-    all_docs = []
+    # 2. Layer 1: Project Map (Hierarchy)
+    print("📂 Mapping project structure...")
+    all_documents.append(generate_project_map(repo_path))
 
-    # 3. Process each commit
-    # For this simple ingestor, we'll look for .kicad_pcb files in the repo
-    # In a real scenario, you might want to specify which file to track
-    pcb_files = []
+    # 3. Layer 2: File Snapshots (Real Content with Chunking)
+    print("📄 Scanning file contents (READMEs, KiCad files, BOMs)...")
+    targets = (".kicad_pcb", ".kicad_sch", ".kicad_pro", ".kicad_dru", ".csv", ".txt", ".md")
+    
     for root, dirs, files in os.walk(repo_path):
-        for file in files:
-            if file.endswith(".kicad_pcb"):
-                rel_path = os.path.relpath(os.path.join(root, file), repo_path)
-                pcb_files.append(rel_path)
-    
-    if not pcb_files:
-        print("❌ No .kicad_pcb files found in the repository!")
-        return
+        dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ['venv', 'node_modules', 'rag_db', '.gemini']]
+        
+        for f in files:
+            if not f.lower().endswith(targets):
+                continue
+                
+            path = os.path.join(root, f)
+            rel_path = os.path.relpath(path, repo_path)
+            
+            try:
+                with open(path, 'r', encoding='utf-8', errors='ignore') as file:
+                    content = file.read()
+                    if not content.strip():
+                        continue
+                        
+                    # CHUNKING: Split large files (like PCBs) into manageable chunks
+                    if len(content) > 10000:
+                        file_chunks = chunk_text(content)
+                        for i, chunk in enumerate(file_chunks):
+                            chunk_doc = builder.build_snapshot_document(rel_path, chunk)
+                            chunk_doc.metadata["chunk"] = i
+                            all_documents.append(chunk_doc)
+                    else:
+                        all_documents.append(builder.build_snapshot_document(rel_path, content))
+            except Exception as e:
+                print(f"  ⚠️ Could not read {rel_path}: {e}")
 
-    print(f"Tracking files: {pcb_files}")
+    # 4. Layer 3: Git History
+    loader = GitLoader(repo_path)
+    try:
+        print("🔨 Processing git history...")
+        commits = loader.get_commits(max_count=50)
+        for commit in commits:
+            # Manually build a doc since we use CommitInfo schema
+            commit_content = f"Commit: {commit.commit_hash}\nMessage: {commit.message}\nAuthor: {commit.author}\nDate: {commit.date}"
+            all_documents.append(RAGDocument(
+                content=commit_content,
+                metadata={"type": "commit_summary", "commit": commit.commit_hash}
+            ))
+    except Exception as e:
+        print(f"  ⚠️ Git error: {e}")
 
-    for i in range(len(commits) - 1):
-        # Compare commit[i+1] (before) with commit[i] (after)
-        after_commit = commits[i]
-        before_commit = commits[i+1]
-
-        print(f"[{i+1}/{len(commits)-1}] Diffing: {before_commit.commit_hash[:7]} -> {after_commit.commit_hash[:7]}")
-
-        for pcb_file in pcb_files:
-            summary = diff_gen.generate_diff(
-                before_commit.commit_hash, 
-                after_commit.commit_hash, 
-                pcb_file
-            )
-
-            # Generate RAG documents
-            docs = doc_builder.build_documents(after_commit, summary, pcb_file)
-            all_docs.extend(docs)
-
-    if not all_docs:
-        print("⚠️ No changes found to index.")
-        return
-
-    # 4. Embed and Store
-    print(f"✨ Generating embeddings for {len(all_docs)} documents...")
-    embeddings = embedder.embed_documents(all_docs)
-    
-    print("💾 Saving to vector database (rag_db/)...")
-    store.add_documents(all_docs, embeddings)
-
-    print("✅ Ingestion complete! faiss.index and documents.pkl have been created.")
+    # 5. Embed and Index
+    if all_documents:
+        # We might have MANY chunks now, so we'll process in small batches for OpenAI
+        print(f"✨ Generating embeddings for {len(all_documents)} chunks...")
+        try:
+            batch_size = 50
+            for i in range(0, len(all_documents), batch_size):
+                batch = all_documents[i:i+batch_size]
+                print(f"  - Batch {i//batch_size + 1}/{len(all_documents)//batch_size + 1}...")
+                embeddings = embedder.embed_documents(batch)
+                vector_store.add_documents(batch, embeddings)
+            
+            vector_store.save()
+            print("✅ Deep Ingestion complete! Every detail is now searchable.")
+        except Exception as e:
+            print(f"❌ Embedding Error: {e}")
+    else:
+        print("⚠️ No documents were generated.")
 
 if __name__ == "__main__":
     main()

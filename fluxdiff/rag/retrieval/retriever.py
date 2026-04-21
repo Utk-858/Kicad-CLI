@@ -54,6 +54,21 @@ class Retriever:
         return RetrievalResult(documents=documents)
 
     # -----------------------------
+    # Direct Filter Lookup
+    # -----------------------------
+    def retrieve_by_type(self, doc_type: str) -> List[RAGDocument]:
+        """
+        Force-fetch documents of a specific type (e.g. project_structure).
+        """
+        return [d for d in self.store.documents if d.metadata.get("type") == doc_type]
+
+    def retrieve_by_filename(self, filename: str) -> List[RAGDocument]:
+        """
+        Force-fetch documents by filename (e.g. README.md).
+        """
+        return [d for d in self.store.documents if d.metadata.get("file") == filename or d.metadata.get("filename") == filename]
+
+    # -----------------------------
     # Filter logic
     # -----------------------------
     def _apply_filters(
